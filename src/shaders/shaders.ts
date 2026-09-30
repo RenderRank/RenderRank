@@ -42,8 +42,10 @@ export const constants = {
 
 // =================================
 
+// Substitutes ${name} with constants[name]. Not done with eval: Rollup tree-shakes object properties that are only
+// referenced from inside an eval'd string, which silently turned e.g. ${lightRadius} into "undefined" in production builds.
 function evalShaderRaw(raw: string) {
-    return eval('`' + raw.replaceAll('${', '${constants.') + '`');
+    return raw.replace(/\$\{(\w+)\}/g, (_, name: string) => String(constants[name as keyof typeof constants]));
 }
 
 const commonSrc: string = evalShaderRaw(commonRaw);
