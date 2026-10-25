@@ -61,16 +61,16 @@ The gaps that matter for a benchmark:
 
 | Area | Current state | Why it matters |
 | --- | --- | --- |
-| **Vsync cap** | Frame time is the interval between `requestAnimationFrame` callbacks ([renderer.ts:152-163](../src/renderer.ts#L152-L163)). In [img/benchmark_rtx5080.csv](../img/benchmark_rtx5080.csv), Forward+ and clustered deferred both floor at 8.33 ms (120 Hz) and step at 16.7/25/33 ms. | We're measuring the display, not the GPU. Every fast result collapses to the refresh rate. **This is the #1 blocker.** |
-| **Resolution** | Canvas = CSS size × `devicePixelRatio` ([renderer.ts:22-24](../src/renderer.ts#L22-L24)). There's no resize handling, and G-buffers are sized once. | Two identical GPUs with different windows or displays get different scores. |
+| **Vsync cap** | Frame time is the interval between `requestAnimationFrame` callbacks ([renderer.ts:81-91](../src/renderer.ts#L81-L91)). In [img/benchmark_rtx5080.csv](../img/benchmark_rtx5080.csv), Forward+ and clustered deferred both floor at 8.33 ms (120 Hz) and step at 16.7/25/33 ms. | We're measuring the display, not the GPU. Every fast result collapses to the refresh rate. **This is the #1 blocker.** |
+| **Resolution** | Canvas = CSS size × `devicePixelRatio` ([context.ts:101-103](../src/gpu/context.ts#L101-L103)). There's no resize handling, and G-buffers are sized once. | Two identical GPUs with different windows or displays get different scores. |
 | **Determinism** | Light colors use `Math.random()` ([lights.ts:202](../src/stage/lights.ts#L202)). Light motion is driven by wall-clock rAF time ([lights.ts:231-232](../src/stage/lights.ts#L231-L232)). The camera is keyboard/mouse only ([camera.ts:125](../src/stage/camera.ts#L125)). | The workload differs from run to run. |
 | **Protocol** | 30 warm-up frames, 120 sample frames, one pass, min/avg/max only ([benchmark.ts:103-109](../src/testing/benchmark.ts#L103-L109)). Pipelines compile synchronously when the renderer is constructed. | Too short to be stable. No percentiles or variance. Shader-compile hitches land in the measured window. |
-| **Architecture** | Module-level globals (`device`, `canvas`…) in [renderer.ts](../src/renderer.ts). Each `Renderer` starts its own rAF loop in the constructor ([renderer.ts:127](../src/renderer.ts#L127)). | The benchmark can't own the frame loop. There's no path to device-loss recovery or multiple tests. |
+| **Architecture** | Each `Renderer` starts its own rAF loop in the constructor ([renderer.ts:55](../src/renderer.ts#L55)). The module-level globals (`device`, `canvas`…) were replaced by `GpuContext` in §6.1. | The benchmark can't own the frame loop until §6.2 lands. |
 | **Materials** | Only base color is used ([scene.ts:46](../src/stage/scene.ts#L46)). Sponza ships normal and metallic-roughness maps plus tangents, all unused. Textures are `rgba8unorm` (not sRGB) with no mipmaps ([scene.ts:205-208](../src/stage/scene.ts#L205-L208)), even though the sampler asks for trilinear filtering. No HDR or tonemapping. | It looks dated, and it under-represents the texture bandwidth a modern workload has. |
 | **Clustering cost** | Each thread loops over all lights and keeps a private `array<u32, 1500>`, which is 6 KB per invocation ([clustering.cs.wgsl:97-100](../src/shaders/clustering.cs.wgsl#L97-L100)). The global index list reserves 3,456 × 1,500 slots (≈21 MB). Light radius and cluster dimensions are compile-time constants ([shaders.ts:33-39](../src/shaders/shaders.ts#L33-L39)). | It may fail or crawl on mobile and integrated GPUs, and light radius can't be changed per preset. The fix must land **before** the workload freeze. |
 | **Clustered deferred G-buffer** | World position stored in `rgba16float` ([clustered_deferred.fs.wgsl:34](../src/shaders/clustered_deferred.fs.wgsl#L34)). | Precision loss far from the origin, and wasted bandwidth. Reconstruct position from depth instead. |
 | **Product** | dat.gui + stats.js, alert/confirm dialogs, CSV auto-download. | No run flow, results page, history, or leaderboard. |
-| **Build hygiene** | `tsc --noEmit` reports 3 errors (scene.ts:122, scene.ts:185, benchmark.ts:128). The build doesn't type-check. Scenes are copied with `cp -r` ([package.json:8](../package.json#L8)). | Fix in week 1 and gate CI on it. |
+| **Build hygiene** | `tsc --noEmit` reports 5 errors: two typed-array errors in scene.ts (`writeBuffer` with `ArrayBufferLike` views) and unused variables in main.ts, shaders.ts, and benchmark.ts. The build doesn't type-check. Scenes are copied with `cp -r` ([package.json:8](../package.json#L8)). | Fix in week 1 and gate CI on it. |
 | **Hosting** | GitHub Pages can't set response headers. [vite.config.ts](../vite.config.ts) allows `renderrank.tonyxtian.com` as a *dev-server* host. | We need COOP/COEP headers (finer timers) and a real production host, not `vite dev`. |
 
 ---
@@ -273,7 +273,7 @@ Uniform data that varies by preset (light count, light radius, cluster dimension
 
 Ordered so everything that changes the workload lands before the freeze.
 
-1. **GpuContext refactor.** Remove the module globals, handle `device.lost`, request `timestamp-query` when available, and record adapter info and limits.
+1. **GpuContext refactor.** Remove the module globals, handle `device.lost`, request `timestamp-query` when available, and record adapter info and limits. **Done:** [src/gpu/context.ts](../src/gpu/context.ts).
 2. **Decouple the frame loop.** Techniques encode frames; drivers own the loop. Add offscreen targets plus the present blit.
 3. **Color pipeline.** sRGB base color, mipmap generation (render-pass downsample at load), `rgba16float` HDR lighting target, tonemap pass (ACES fit or AgX).
 4. **PBR + normal mapping.** Use the existing TANGENT attribute and metallic-roughness textures. Use alpha cutoff from the material rather than the hardcoded 0.5.
@@ -565,7 +565,7 @@ Owners follow the README's division of work. Integration, reviews, and device te
 
 **Week 1, Oct 26 – Nov 1: Foundations and spikes**
 - Everyone: review this plan and settle the [open decisions](#15-open-decisions).
-- Yiding: `GpuContext` refactor, loop decoupling, offscreen targets + present blit. Fix the 3 `tsc` errors.
+- Yiding: `GpuContext` refactor (done), loop decoupling, offscreen targets + present blit. Fix the 5 `tsc` errors.
 - Charles: **throughput-loop spike on ≥3 browser/device pairs** (go/no-go for §3.1). Seeded PRNG, timeline clock.
 - Eric: app shell, routing, wireframes for run and results pages.
 - Michael: `shared/` schema v0, backend skeleton deployed with COOP/COEP headers, CI with type-check.

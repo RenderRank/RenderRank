@@ -14,7 +14,7 @@ export class ForwardPlusRenderer extends renderer.Renderer {
     constructor(stage: Stage) {
         super(stage);
 
-        this.sceneUniformsBindGroupLayout = renderer.device.createBindGroupLayout({
+        this.sceneUniformsBindGroupLayout = this.gpu.device.createBindGroupLayout({
             label: "forward+ scene uniforms bind group layout",
             entries: [
                 { // camera uniforms
@@ -40,7 +40,7 @@ export class ForwardPlusRenderer extends renderer.Renderer {
             ]
         });
 
-        this.sceneUniformsBindGroup = renderer.device.createBindGroup({
+        this.sceneUniformsBindGroup = this.gpu.device.createBindGroup({
             label: "forward+ scene uniforms bind group",
             layout: this.sceneUniformsBindGroupLayout,
             entries: [
@@ -63,20 +63,20 @@ export class ForwardPlusRenderer extends renderer.Renderer {
             ]
         });
 
-        this.depthTexture = renderer.device.createTexture({
-            size: [renderer.canvas.width, renderer.canvas.height],
+        this.depthTexture = this.gpu.device.createTexture({
+            size: [this.gpu.canvas.width, this.gpu.canvas.height],
             format: "depth24plus",
             usage: GPUTextureUsage.RENDER_ATTACHMENT
         });
         this.depthTextureView = this.depthTexture.createView();
 
-        this.pipeline = renderer.device.createRenderPipeline({
-            layout: renderer.device.createPipelineLayout({
+        this.pipeline = this.gpu.device.createRenderPipeline({
+            layout: this.gpu.device.createPipelineLayout({
                 label: "forward+ pipeline layout",
                 bindGroupLayouts: [
                     this.sceneUniformsBindGroupLayout,
-                    renderer.modelBindGroupLayout,
-                    renderer.materialBindGroupLayout
+                    this.gpu.modelBindGroupLayout,
+                    this.gpu.materialBindGroupLayout
                 ]
             }),
             depthStencil: {
@@ -85,20 +85,20 @@ export class ForwardPlusRenderer extends renderer.Renderer {
                 format: "depth24plus"
             },
             vertex: {
-                module: renderer.device.createShaderModule({
+                module: this.gpu.device.createShaderModule({
                     label: "forward+ vert shader",
                     code: shaders.naiveVertSrc
                 }),
                 buffers: [ renderer.vertexBufferLayout ]
             },
             fragment: {
-                module: renderer.device.createShaderModule({
+                module: this.gpu.device.createShaderModule({
                     label: "forward+ frag shader",
                     code: shaders.forwardPlusFragSrc
                 }),
                 targets: [
                     {
-                        format: renderer.canvasFormat
+                        format: this.gpu.canvasFormat
                     }
                 ]
             }
@@ -106,13 +106,13 @@ export class ForwardPlusRenderer extends renderer.Renderer {
     }
 
     override draw() {
-        const encoder = renderer.device.createCommandEncoder();
+        const encoder = this.gpu.device.createCommandEncoder();
 
         // Run clustering compute shader
         this.lights.doLightClustering(encoder);
 
         // Render pass
-        const canvasTextureView = renderer.context.getCurrentTexture().createView();
+        const canvasTextureView = this.gpu.canvasContext.getCurrentTexture().createView();
 
         const renderPass = encoder.beginRenderPass({
             label: "forward+ render pass",
@@ -147,6 +147,6 @@ export class ForwardPlusRenderer extends renderer.Renderer {
 
         renderPass.end();
 
-        renderer.device.queue.submit([encoder.finish()]);
+        this.gpu.device.queue.submit([encoder.finish()]);
     }
 }

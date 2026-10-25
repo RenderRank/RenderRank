@@ -1,6 +1,7 @@
 import { Mat4, mat4, Vec3, vec3 } from "wgpu-matrix";
 import { toRadians } from "../math_util";
-import { device, canvas, fovYDegrees, aspectRatio } from "../renderer";
+import { fovYDegrees } from "../renderer";
+import { GpuContext } from "../gpu/context";
 
 class CameraUniforms {
     // viewProjMat (16) + invProjMat (16) + viewMat (16) + screenWidth (1) + screenHeight (1) + nearPlane (1) + farPlane (1) = 52 floats
@@ -43,6 +44,8 @@ class CameraUniforms {
 }
 
 export class Camera {
+    private gpu: GpuContext;
+
     uniforms: CameraUniforms = new CameraUniforms();
     uniformsBuffer: GPUBuffer;
 
@@ -62,19 +65,21 @@ export class Camera {
 
     keys: { [key: string]: boolean } = {};
 
-    constructor () {
+    constructor (gpu: GpuContext) {
+        this.gpu = gpu;
+
         // TODO-1.1: set `this.uniformsBuffer` to a new buffer of size `this.uniforms.buffer.byteLength`
         // ensure the usage is set to `GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST` since we will be copying to this buffer
         // check `lights.ts` for examples of using `device.createBuffer()`
         //
         // note that you can add more variables (e.g. inverse proj matrix) to this buffer in later parts of the assignment
-        this.uniformsBuffer = device.createBuffer({
+        this.uniformsBuffer = gpu.device.createBuffer({
             label: "camera uniforms",
             size: this.uniforms.buffer.byteLength,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
         });
 
-        this.projMat = mat4.perspective(toRadians(fovYDegrees), aspectRatio, Camera.nearPlane, Camera.farPlane);
+        this.projMat = mat4.perspective(toRadians(fovYDegrees), gpu.aspectRatio, Camera.nearPlane, Camera.farPlane);
         this.invProjMat = mat4.invert(this.projMat);
 
         this.rotateCamera(0, 0); // set initial camera vectors
@@ -83,9 +88,9 @@ export class Camera {
         window.addEventListener('keyup', (event) => this.onKeyEvent(event, false));
         window.onblur = () => this.keys = {}; // reset keys on page exit so they don't get stuck (e.g. on alt + tab)
 
-        canvas.addEventListener('mousedown', () => canvas.requestPointerLock());
-        canvas.addEventListener('mouseup', () => document.exitPointerLock());
-        canvas.addEventListener('mousemove', (event) => this.onMouseMove(event));
+        gpu.canvas.addEventListener('mousedown', () => gpu.canvas.requestPointerLock());
+        gpu.canvas.addEventListener('mouseup', () => document.exitPointerLock());
+        gpu.canvas.addEventListener('mousemove', (event) => this.onMouseMove(event));
     }
 
     private onKeyEvent(event: KeyboardEvent, down: boolean) {
@@ -117,7 +122,7 @@ export class Camera {
     }
 
     private onMouseMove(event: MouseEvent) {
-        if (document.pointerLockElement === canvas) {
+        if (document.pointerLockElement === this.gpu.canvas) {
             this.rotateCamera(event.movementX * this.sensitivity, event.movementY * this.sensitivity);
         }
     }
@@ -170,11 +175,11 @@ export class Camera {
         const invProjMat = mat4.invert(this.projMat);
         this.uniforms.invProjMat = invProjMat;
         this.uniforms.viewMat = viewMat;
-        this.uniforms.screenWidth = canvas.width;
-        this.uniforms.screenHeight = canvas.height;
+        this.uniforms.screenWidth = this.gpu.canvas.width;
+        this.uniforms.screenHeight = this.gpu.canvas.height;
         this.uniforms.nearPlane = Camera.nearPlane;
         this.uniforms.farPlane = Camera.farPlane;
 
-        device.queue.writeBuffer(this.uniformsBuffer, 0, this.uniforms.buffer);
+        this.gpu.device.queue.writeBuffer(this.uniformsBuffer, 0, this.uniforms.buffer);
     }
 }

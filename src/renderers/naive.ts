@@ -14,7 +14,7 @@ export class NaiveRenderer extends renderer.Renderer {
     constructor(stage: Stage) {
         super(stage);
 
-        this.sceneUniformsBindGroupLayout = renderer.device.createBindGroupLayout({
+        this.sceneUniformsBindGroupLayout = this.gpu.device.createBindGroupLayout({
             label: "scene uniforms bind group layout",
             entries: [
                 // TODO-1.2: add an entry for camera uniforms at binding 0, visible to only the vertex shader, and of type "uniform"
@@ -31,7 +31,7 @@ export class NaiveRenderer extends renderer.Renderer {
             ]
         });
 
-        this.sceneUniformsBindGroup = renderer.device.createBindGroup({
+        this.sceneUniformsBindGroup = this.gpu.device.createBindGroup({
             label: "scene uniforms bind group",
             layout: this.sceneUniformsBindGroupLayout,
             entries: [
@@ -49,20 +49,20 @@ export class NaiveRenderer extends renderer.Renderer {
             ]
         });
 
-        this.depthTexture = renderer.device.createTexture({
-            size: [renderer.canvas.width, renderer.canvas.height],
+        this.depthTexture = this.gpu.device.createTexture({
+            size: [this.gpu.canvas.width, this.gpu.canvas.height],
             format: "depth24plus",
             usage: GPUTextureUsage.RENDER_ATTACHMENT
         });
         this.depthTextureView = this.depthTexture.createView();
 
-        this.pipeline = renderer.device.createRenderPipeline({
-            layout: renderer.device.createPipelineLayout({
+        this.pipeline = this.gpu.device.createRenderPipeline({
+            layout: this.gpu.device.createPipelineLayout({
                 label: "naive pipeline layout",
                 bindGroupLayouts: [
                     this.sceneUniformsBindGroupLayout,
-                    renderer.modelBindGroupLayout,
-                    renderer.materialBindGroupLayout
+                    this.gpu.modelBindGroupLayout,
+                    this.gpu.materialBindGroupLayout
                 ]
             }),
             depthStencil: {
@@ -71,20 +71,20 @@ export class NaiveRenderer extends renderer.Renderer {
                 format: "depth24plus"
             },
             vertex: {
-                module: renderer.device.createShaderModule({
+                module: this.gpu.device.createShaderModule({
                     label: "naive vert shader",
                     code: shaders.naiveVertSrc
                 }),
                 buffers: [ renderer.vertexBufferLayout ]
             },
             fragment: {
-                module: renderer.device.createShaderModule({
+                module: this.gpu.device.createShaderModule({
                     label: "naive frag shader",
                     code: shaders.naiveFragSrc,
                 }),
                 targets: [
                     {
-                        format: renderer.canvasFormat,
+                        format: this.gpu.canvasFormat,
                     }
                 ]
             }
@@ -92,8 +92,8 @@ export class NaiveRenderer extends renderer.Renderer {
     }
 
     override draw() {
-        const encoder = renderer.device.createCommandEncoder();
-        const canvasTextureView = renderer.context.getCurrentTexture().createView();
+        const encoder = this.gpu.device.createCommandEncoder();
+        const canvasTextureView = this.gpu.canvasContext.getCurrentTexture().createView();
 
         const renderPass = encoder.beginRenderPass({
             label: "naive render pass",
@@ -129,6 +129,6 @@ export class NaiveRenderer extends renderer.Renderer {
 
         renderPass.end();
 
-        renderer.device.queue.submit([encoder.finish()]);
+        this.gpu.device.queue.submit([encoder.finish()]);
     }
 }

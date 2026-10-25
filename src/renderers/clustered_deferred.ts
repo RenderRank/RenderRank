@@ -30,40 +30,40 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
     constructor(stage: Stage) {
         super(stage);
 
-        this.gBufferPositionTexture = renderer.device.createTexture({
-            size: [renderer.canvas.width, renderer.canvas.height],
+        this.gBufferPositionTexture = this.gpu.device.createTexture({
+            size: [this.gpu.canvas.width, this.gpu.canvas.height],
             format: "rgba16float",
             usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
         });
         this.gBufferPositionTextureView = this.gBufferPositionTexture.createView();
 
-        this.gBufferNormalTexture = renderer.device.createTexture({
-            size: [renderer.canvas.width, renderer.canvas.height],
+        this.gBufferNormalTexture = this.gpu.device.createTexture({
+            size: [this.gpu.canvas.width, this.gpu.canvas.height],
             format: "rgba16float",
             usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
         });
         this.gBufferNormalTextureView = this.gBufferNormalTexture.createView();
 
-        this.gBufferAlbedoTexture = renderer.device.createTexture({
-            size: [renderer.canvas.width, renderer.canvas.height],
+        this.gBufferAlbedoTexture = this.gpu.device.createTexture({
+            size: [this.gpu.canvas.width, this.gpu.canvas.height],
             format: "rgba8unorm",
             usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
         });
         this.gBufferAlbedoTextureView = this.gBufferAlbedoTexture.createView();
 
-        this.depthTexture = renderer.device.createTexture({
-            size: [renderer.canvas.width, renderer.canvas.height],
+        this.depthTexture = this.gpu.device.createTexture({
+            size: [this.gpu.canvas.width, this.gpu.canvas.height],
             format: "depth24plus",
             usage: GPUTextureUsage.RENDER_ATTACHMENT
         });
         this.depthTextureView = this.depthTexture.createView();
 
-        this.gBufferSampler = renderer.device.createSampler({
+        this.gBufferSampler = this.gpu.device.createSampler({
             magFilter: "nearest",
             minFilter: "nearest"
         });
 
-        this.gBufferBindGroupLayout = renderer.device.createBindGroupLayout({
+        this.gBufferBindGroupLayout = this.gpu.device.createBindGroupLayout({
             label: "clustered deferred G-buffer bind group layout",
             entries: [
                 { // camera uniforms
@@ -74,7 +74,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
             ]
         });
 
-        this.gBufferBindGroup = renderer.device.createBindGroup({
+        this.gBufferBindGroup = this.gpu.device.createBindGroup({
             label: "clustered deferred G-buffer bind group",
             layout: this.gBufferBindGroupLayout,
             entries: [
@@ -85,7 +85,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
             ]
         });
 
-        this.fullscreenBindGroupLayout = renderer.device.createBindGroupLayout({
+        this.fullscreenBindGroupLayout = this.gpu.device.createBindGroupLayout({
             label: "clustered deferred fullscreen bind group layout",
             entries: [
                 { // camera uniforms
@@ -131,7 +131,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
             ]
         });
 
-        this.fullscreenBindGroup = renderer.device.createBindGroup({
+        this.fullscreenBindGroup = this.gpu.device.createBindGroup({
             label: "clustered deferred fullscreen bind group",
             layout: this.fullscreenBindGroupLayout,
             entries: [
@@ -171,13 +171,13 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
         });
 
         // Create G-buffer pipeline
-        this.gBufferPipeline = renderer.device.createRenderPipeline({
-            layout: renderer.device.createPipelineLayout({
+        this.gBufferPipeline = this.gpu.device.createRenderPipeline({
+            layout: this.gpu.device.createPipelineLayout({
                 label: "clustered deferred G-buffer pipeline layout",
                 bindGroupLayouts: [
                     this.gBufferBindGroupLayout,
-                    renderer.modelBindGroupLayout,
-                    renderer.materialBindGroupLayout
+                    this.gpu.modelBindGroupLayout,
+                    this.gpu.materialBindGroupLayout
                 ]
             }),
             depthStencil: {
@@ -186,14 +186,14 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                 format: "depth24plus"
             },
             vertex: {
-                module: renderer.device.createShaderModule({
+                module: this.gpu.device.createShaderModule({
                     label: "clustered deferred G-buffer vert shader",
                     code: shaders.naiveVertSrc
                 }),
                 buffers: [ renderer.vertexBufferLayout ]
             },
             fragment: {
-                module: renderer.device.createShaderModule({
+                module: this.gpu.device.createShaderModule({
                     label: "clustered deferred G-buffer frag shader",
                     code: shaders.clusteredDeferredFragSrc
                 }),
@@ -212,27 +212,27 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
         });
 
         // Create fullscreen pipeline
-        this.fullscreenPipeline = renderer.device.createRenderPipeline({
-            layout: renderer.device.createPipelineLayout({
+        this.fullscreenPipeline = this.gpu.device.createRenderPipeline({
+            layout: this.gpu.device.createPipelineLayout({
                 label: "clustered deferred fullscreen pipeline layout",
                 bindGroupLayouts: [
                     this.fullscreenBindGroupLayout
                 ]
             }),
             vertex: {
-                module: renderer.device.createShaderModule({
+                module: this.gpu.device.createShaderModule({
                     label: "clustered deferred fullscreen vert shader",
                     code: shaders.clusteredDeferredFullscreenVertSrc
                 })
             },
             fragment: {
-                module: renderer.device.createShaderModule({
+                module: this.gpu.device.createShaderModule({
                     label: "clustered deferred fullscreen frag shader",
                     code: shaders.clusteredDeferredFullscreenFragSrc
                 }),
                 targets: [
                     {
-                        format: renderer.canvasFormat
+                        format: this.gpu.canvasFormat
                     }
                 ]
             }
@@ -240,7 +240,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
     }
 
     override draw() {
-        const encoder = renderer.device.createCommandEncoder();
+        const encoder = this.gpu.device.createCommandEncoder();
 
         // Run clustering compute shader
         this.lights.doLightClustering(encoder);
@@ -292,7 +292,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
         gBufferPass.end();
 
         // Fullscreen lighting pass
-        const canvasTextureView = renderer.context.getCurrentTexture().createView();
+        const canvasTextureView = this.gpu.canvasContext.getCurrentTexture().createView();
 
         const fullscreenPass = encoder.beginRenderPass({
             label: "clustered deferred fullscreen pass",
@@ -312,6 +312,6 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
 
         fullscreenPass.end();
 
-        renderer.device.queue.submit([encoder.finish()]);
+        this.gpu.device.queue.submit([encoder.finish()]);
     }
 }

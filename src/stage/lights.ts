@@ -1,5 +1,5 @@
 import { vec3 } from "wgpu-matrix";
-import { device } from "../renderer";
+import { GpuContext } from "../gpu/context";
 
 import * as shaders from '../shaders/shaders';
 import { Camera } from "./camera";
@@ -11,6 +11,7 @@ function hueToRgb(h: number) {
 }
 
 export class Lights {
+    private gpu: GpuContext;
     private camera: Camera;
 
     numLights = 500;
@@ -37,10 +38,11 @@ export class Lights {
     clusteringComputeBindGroup: GPUBindGroup;
     clusteringComputePipeline: GPUComputePipeline;
 
-    constructor(camera: Camera) {
+    constructor(gpu: GpuContext, camera: Camera) {
+        this.gpu = gpu;
         this.camera = camera;
 
-        this.lightSetStorageBuffer = device.createBuffer({
+        this.lightSetStorageBuffer = this.gpu.device.createBuffer({
             label: "lights",
             size: 16 + this.lightsArray.byteLength, // 16 for numLights + padding
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
@@ -48,13 +50,13 @@ export class Lights {
         this.populateLightsBuffer();
         this.updateLightSetUniformNumLights();
 
-        this.timeUniformBuffer = device.createBuffer({
+        this.timeUniformBuffer = this.gpu.device.createBuffer({
             label: "time uniform",
             size: 4,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
         });
 
-        this.moveLightsComputeBindGroupLayout = device.createBindGroupLayout({
+        this.moveLightsComputeBindGroupLayout = this.gpu.device.createBindGroupLayout({
             label: "move lights compute bind group layout",
             entries: [
                 { // lightSet
@@ -70,7 +72,7 @@ export class Lights {
             ]
         });
 
-        this.moveLightsComputeBindGroup = device.createBindGroup({
+        this.moveLightsComputeBindGroup = this.gpu.device.createBindGroup({
             label: "move lights compute bind group",
             layout: this.moveLightsComputeBindGroupLayout,
             entries: [
@@ -85,14 +87,14 @@ export class Lights {
             ]
         });
 
-        this.moveLightsComputePipeline = device.createComputePipeline({
+        this.moveLightsComputePipeline = this.gpu.device.createComputePipeline({
             label: "move lights compute pipeline",
-            layout: device.createPipelineLayout({
+            layout: this.gpu.device.createPipelineLayout({
                 label: "move lights compute pipeline layout",
                 bindGroupLayouts: [ this.moveLightsComputeBindGroupLayout ]
             }),
             compute: {
-                module: device.createShaderModule({
+                module: this.gpu.device.createShaderModule({
                     label: "move lights compute shader",
                     code: shaders.moveLightsComputeSrc
                 }),
@@ -104,25 +106,25 @@ export class Lights {
                              shaders.constants.clusterHeight *
                              shaders.constants.clusterDepth;
 
-        this.clusterAABBsBuffer = device.createBuffer({
+        this.clusterAABBsBuffer = this.gpu.device.createBuffer({
             label: "cluster AABBs",
             size: totalClusters * 32, // 2 vec4f per AABB
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
         });
 
-        this.lightGridBuffer = device.createBuffer({
+        this.lightGridBuffer = this.gpu.device.createBuffer({
             label: "light grid",
             size: totalClusters * 8,
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
         });
 
-        this.globalLightIndexListBuffer = device.createBuffer({
+        this.globalLightIndexListBuffer = this.gpu.device.createBuffer({
             label: "global light index list",
             size: totalClusters * shaders.constants.maxLightsPerCluster * 4, 
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
         });
 
-        this.clusteringComputeBindGroupLayout = device.createBindGroupLayout({
+        this.clusteringComputeBindGroupLayout = this.gpu.device.createBindGroupLayout({
             label: "clustering compute bind group layout",
             entries: [
                 { // camera uniforms
@@ -153,7 +155,7 @@ export class Lights {
             ]
         });
 
-        this.clusteringComputeBindGroup = device.createBindGroup({
+        this.clusteringComputeBindGroup = this.gpu.device.createBindGroup({
             label: "clustering compute bind group",
             layout: this.clusteringComputeBindGroupLayout,
             entries: [
@@ -180,14 +182,14 @@ export class Lights {
             ]
         });
 
-        this.clusteringComputePipeline = device.createComputePipeline({
+        this.clusteringComputePipeline = this.gpu.device.createComputePipeline({
             label: "clustering compute pipeline",
-            layout: device.createPipelineLayout({
+            layout: this.gpu.device.createPipelineLayout({
                 label: "clustering compute pipeline layout",
                 bindGroupLayouts: [ this.clusteringComputeBindGroupLayout ]
             }),
             compute: {
-                module: device.createShaderModule({
+                module: this.gpu.device.createShaderModule({
                     label: "clustering compute shader",
                     code: shaders.clusteringComputeSrc
                 }),
@@ -203,11 +205,11 @@ export class Lights {
             this.lightsArray.set(lightColor, (lightIdx * Lights.numFloatsPerLight) + 4);
         }
 
-        device.queue.writeBuffer(this.lightSetStorageBuffer, 16, this.lightsArray);
+        this.gpu.device.queue.writeBuffer(this.lightSetStorageBuffer, 16, this.lightsArray);
     }
 
     updateLightSetUniformNumLights() {
-        device.queue.writeBuffer(this.lightSetStorageBuffer, 0, new Uint32Array([this.numLights]));
+        this.gpu.device.queue.writeBuffer(this.lightSetStorageBuffer, 0, new Uint32Array([this.numLights]));
     }
 
     doLightClustering(encoder: GPUCommandEncoder) {
@@ -229,10 +231,10 @@ export class Lights {
 
     // CHECKITOUT: this is where the light movement compute shader is dispatched from the host
     onFrame(time: number) {
-        device.queue.writeBuffer(this.timeUniformBuffer, 0, new Float32Array([time]));
+        this.gpu.device.queue.writeBuffer(this.timeUniformBuffer, 0, new Float32Array([time]));
 
         // not using same encoder as render pass so this doesn't interfere with measuring actual rendering performance
-        const encoder = device.createCommandEncoder();
+        const encoder = this.gpu.device.createCommandEncoder();
 
         const computePass = encoder.beginComputePass();
         computePass.setPipeline(this.moveLightsComputePipeline);
@@ -244,6 +246,6 @@ export class Lights {
 
         computePass.end();
 
-        device.queue.submit([encoder.finish()]);
+        this.gpu.device.queue.submit([encoder.finish()]);
     }
 }

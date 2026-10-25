@@ -1,7 +1,8 @@
 import Stats from 'stats.js';
 import { GUI } from 'dat.gui';
 
-import { initWebGPU, Renderer } from './renderer';
+import { Renderer } from './renderer';
+import { GpuContext } from './gpu/context';
 import { NaiveRenderer } from './renderers/naive';
 import { ForwardPlusRenderer } from './renderers/forward_plus';
 import { ClusteredDeferredRenderer } from './renderers/clustered_deferred';
@@ -12,14 +13,27 @@ import { Camera } from './stage/camera';
 import { Stage } from './stage/stage';
 import { BenchmarkRunner } from './testing/benchmark';
 
-await initWebGPU();
+// Replaces the whole page with a message, for when WebGPU can't run at all
+function showFatalError(message: string) {
+    const errorMessageElement = document.createElement("h1");
+    errorMessageElement.textContent = message;
+    errorMessageElement.style.paddingLeft = '0.4em';
+    document.body.innerHTML = '';
+    document.body.appendChild(errorMessageElement);
+}
+
+const canvas = document.getElementById("mainCanvas") as HTMLCanvasElement;
+const gpu = await GpuContext.create(canvas).catch((error: Error) => {
+    showFatalError(error.message);
+    throw error;
+});
 setupLoaders();
 
-let scene = new Scene();
+let scene = new Scene(gpu);
 await scene.loadGltf('./scenes/sponza/Sponza.gltf');
 
-const camera = new Camera();
-const lights = new Lights(camera);
+const camera = new Camera(gpu);
+const lights = new Lights(gpu, camera);
 
 const stats = new Stats();
 stats.showPanel(0);
@@ -30,7 +44,7 @@ gui.add(lights, 'numLights').min(1).max(Lights.maxNumLights).step(1).onChange(()
     lights.updateLightSetUniformNumLights();
 });
 
-const stage = new Stage(scene, lights, camera, stats);
+const stage = new Stage(gpu, scene, lights, camera, stats);
 
 var renderer: Renderer | undefined;
 
@@ -57,6 +71,12 @@ let renderModeController = gui.add({ mode: renderModes.clusteredDeferred }, 'mod
 renderModeController.onChange(setRenderer);
 
 setRenderer(renderModeController.getValue());
+
+// Every GPU resource dies with the device, so stop drawing and tell the user instead of showing a frozen frame
+gpu.lost.then((info) => {
+    renderer?.stop();
+    showFatalError(`The GPU device was lost (${info.message || info.reason}). Reload the page to try again.`);
+});
 
 // Setup benchmark runner
 const benchmarkRunner = new BenchmarkRunner(

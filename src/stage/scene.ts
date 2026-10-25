@@ -9,7 +9,7 @@ import { registerLoaders, load } from '@loaders.gl/core';
 import { GLTFLoader, GLTFWithBuffers, GLTFMesh, GLTFMeshPrimitive, GLTFMaterial, GLTFSampler } from '@loaders.gl/gltf';
 import { ImageLoader } from '@loaders.gl/images';
 import { Mat4, mat4 } from 'wgpu-matrix';
-import { device, materialBindGroupLayout, modelBindGroupLayout } from '../renderer';
+import { GpuContext } from '../gpu/context';
 
 export function setupLoaders() {
     registerLoaders([GLTFLoader, ImageLoader]);
@@ -40,14 +40,14 @@ export class Material {
 
     materialBindGroup: GPUBindGroup;
 
-    constructor(gltfMaterial: GLTFMaterial, textures: Texture[]) {
+    constructor(gpu: GpuContext, gltfMaterial: GLTFMaterial, textures: Texture[]) {
         this.id = Material.nextId++;
 
         const diffuseTexture = textures[gltfMaterial.pbrMetallicRoughness!.baseColorTexture!.index];
 
-        this.materialBindGroup = device.createBindGroup({
+        this.materialBindGroup = gpu.device.createBindGroup({
             label: "material bind group",
-            layout: materialBindGroupLayout,
+            layout: gpu.materialBindGroupLayout,
             entries: [
                 {
                     binding: 0,
@@ -69,7 +69,7 @@ export class Primitive {
 
     material: Material;
 
-    constructor(gltfPrim: GLTFMeshPrimitive, gltfWithBuffers: GLTFWithBuffers, material: Material) {
+    constructor(device: GPUDevice, gltfPrim: GLTFMeshPrimitive, gltfWithBuffers: GLTFWithBuffers, material: Material) {
         this.material = material;
 
         const gltf = gltfWithBuffers.json;
@@ -135,9 +135,9 @@ export class Primitive {
 export class Mesh {
     primitives: Primitive[] = [];
 
-    constructor(gltfMesh: GLTFMesh, gltfWithBuffers: GLTFWithBuffers, sceneMaterials: Material[]) {
+    constructor(device: GPUDevice, gltfMesh: GLTFMesh, gltfWithBuffers: GLTFWithBuffers, sceneMaterials: Material[]) {
         gltfMesh.primitives.forEach((gltfPrim: GLTFMeshPrimitive) => {
-            this.primitives.push(new Primitive(gltfPrim, gltfWithBuffers, sceneMaterials[gltfPrim.material!]));
+            this.primitives.push(new Primitive(device, gltfPrim, gltfWithBuffers, sceneMaterials[gltfPrim.material!]));
         });
 
         this.primitives.sort((primA: Primitive, primB: Primitive) => {
@@ -170,23 +170,23 @@ export class Node {
         newParent.children.add(this);
     }
 
-    propagateTransformations() {
+    propagateTransformations(gpu: GpuContext) {
         if (this.parent != undefined) {
             this.transform = mat4.mul(this.parent.transform, this.transform);
         }
 
         if (this.mesh != undefined) {
-            this.modelMatUniformBuffer = device.createBuffer({
+            this.modelMatUniformBuffer = gpu.device.createBuffer({
                 label: "model mat uniform",
                 size: 16 * 4,
                 usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
             });
 
-            device.queue.writeBuffer(this.modelMatUniformBuffer, 0, this.transform);
+            gpu.device.queue.writeBuffer(this.modelMatUniformBuffer, 0, this.transform);
 
-            this.modelBindGroup = device.createBindGroup({
+            this.modelBindGroup = gpu.device.createBindGroup({
                 label: "model bind group",
-                layout: modelBindGroupLayout,
+                layout: gpu.modelBindGroupLayout,
                 entries: [
                     {
                         binding: 0,
@@ -197,12 +197,12 @@ export class Node {
         }
 
         for (let child of this.children) {
-            child.propagateTransformations();
+            child.propagateTransformations(gpu);
         }
     }
 }
 
-function createTexture(imageBitmap: ImageBitmap): GPUTexture {
+function createTexture(device: GPUDevice, imageBitmap: ImageBitmap): GPUTexture {
     let texture = device.createTexture({
         size: [imageBitmap.width, imageBitmap.height],
         format: 'rgba8unorm',
@@ -231,7 +231,7 @@ function convertWrapModeEnum(wrapMode: number): GPUAddressMode {
     }
 }
 
-function createSampler(gltfSampler: GLTFSampler): GPUSampler {
+function createSampler(device: GPUDevice, gltfSampler: GLTFSampler): GPUSampler {
     let samplerDescriptor: GPUSamplerDescriptor = {};
 
     switch (gltfSampler.magFilter) {
@@ -279,9 +279,11 @@ function createSampler(gltfSampler: GLTFSampler): GPUSampler {
 }
 
 export class Scene {
+    private gpu: GpuContext;
     private root: Node = new Node();
 
-    constructor() {
+    constructor(gpu: GpuContext) {
+        this.gpu = gpu;
         this.root.setName("root");
     }
 
@@ -293,12 +295,12 @@ export class Scene {
         {
             let sceneImages: GPUTexture[] = [];
             for (let gltfImage of gltfWithBuffers.images!) {
-                sceneImages.push(createTexture(gltfImage as ImageBitmap))
+                sceneImages.push(createTexture(this.gpu.device, gltfImage as ImageBitmap))
             }
 
             let sceneSamplers: GPUSampler[] = [];
             for (let gltfSampler of gltf.samplers!) {
-                sceneSamplers.push(createSampler(gltfSampler));
+                sceneSamplers.push(createSampler(this.gpu.device, gltfSampler));
             }
 
             for (let gltfTexture of gltf.textures!) {
@@ -308,12 +310,12 @@ export class Scene {
 
         let sceneMaterials: Material[] = [];
         for (let gltfMaterial of gltf.materials!) {
-            sceneMaterials.push(new Material(gltfMaterial, sceneTextures));
+            sceneMaterials.push(new Material(this.gpu, gltfMaterial, sceneTextures));
         }
 
         let sceneMeshes: Mesh[] = [];
         for (let gltfMesh of gltf.meshes!) {
-            sceneMeshes.push(new Mesh(gltfMesh, gltfWithBuffers, sceneMaterials));
+            sceneMeshes.push(new Mesh(this.gpu.device, gltfMesh, gltfWithBuffers, sceneMaterials));
         }
 
         let sceneRoot: Node = new Node();
@@ -361,7 +363,7 @@ export class Scene {
             }
         }
 
-        sceneRoot.propagateTransformations();
+        sceneRoot.propagateTransformations(this.gpu);
     }
 
     iterate(nodeFunction: (node: Node) => void, materialFunction: (material: Material) => void,
