@@ -124,15 +124,40 @@ export class GpuContext {
         this.materialBindGroupLayout = device.createBindGroupLayout({
             label: "material bind group layout",
             entries: [
-                { // diffuseTex
+                { // baseColorTex
                     binding: 0,
                     visibility: GPUShaderStage.FRAGMENT,
                     texture: {}
                 },
-                { // diffuseTexSampler
+                { // baseColorSampler
                     binding: 1,
                     visibility: GPUShaderStage.FRAGMENT,
                     sampler: {}
+                },
+                { // normalTex
+                    binding: 2,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    texture: {}
+                },
+                { // normalSampler
+                    binding: 3,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    sampler: {}
+                },
+                { // metallicRoughnessTex
+                    binding: 4,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    texture: {}
+                },
+                { // metallicRoughnessSampler
+                    binding: 5,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    sampler: {}
+                },
+                { // material uniforms
+                    binding: 6,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    buffer: { type: "uniform" }
                 }
             ]
         });

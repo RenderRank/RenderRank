@@ -12,7 +12,7 @@ export interface Resolution {
 }
 
 export const vertexBufferLayout: GPUVertexBufferLayout = {
-    arrayStride: 32,
+    arrayStride: 48,
     attributes: [
         { // pos
             format: "float32x3",
@@ -28,6 +28,11 @@ export const vertexBufferLayout: GPUVertexBufferLayout = {
             format: "float32x2",
             offset: 24,
             shaderLocation: 2
+        },
+        { // tangent (w is the bitangent sign)
+            format: "float32x4",
+            offset: 32,
+            shaderLocation: 3
         }
     ]
 };

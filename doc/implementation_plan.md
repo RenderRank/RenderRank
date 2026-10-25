@@ -66,7 +66,7 @@ The gaps that matter for a benchmark:
 | **Determinism** | Light colors use `Math.random()` ([lights.ts:204](../src/stage/lights.ts#L204)). Light motion is driven by wall-clock rAF time ([lights.ts:233-234](../src/stage/lights.ts#L233-L234)). The camera is keyboard/mouse only ([camera.ts:134](../src/stage/camera.ts#L134)). | The workload differs from run to run. |
 | **Protocol** | 30 warm-up frames, 120 sample frames, one pass, min/avg/max only ([benchmark.ts:86-92](../src/testing/benchmark.ts#L86-L92)). Pipelines compile synchronously when the renderer is constructed. | Too short to be stable. No percentiles or variance. Shader-compile hitches land in the measured window. |
 | **Architecture** | Fixed in §6.1–6.2. `GpuContext` replaced the module-level globals. Renderers only encode frames, and a `DisplayDriver` ([display_driver.ts](../src/drivers/display_driver.ts)) owns the rAF loop. | The uncapped throughput driver (§3.1) still needs building on top. |
-| **Materials** | Only base color is used ([scene.ts:47](../src/stage/scene.ts#L47)). Sponza ships normal and metallic-roughness maps plus tangents, all unused. (sRGB textures, mipmaps, HDR, and tonemapping landed in §6.3.) | It looks dated, and it under-represents the texture bandwidth a modern workload has. |
+| **Materials** | Fixed in §6.3–6.4. Textures are sRGB-correct and mipmapped. Lighting is HDR with an ACES tonemap and metallic-roughness PBR. Normal maps, glTF factors, and alpha modes are used. | There's no ambient or environment light yet, so unlit metal reads as black. |
 | **Clustering cost** | Each thread loops over all lights and keeps a private `array<u32, 1500>`, which is 6 KB per invocation ([clustering.cs.wgsl:97-100](../src/shaders/clustering.cs.wgsl#L97-L100)). The global index list reserves 3,456 × 1,500 slots (≈21 MB). Light radius and cluster dimensions are compile-time constants ([shaders.ts:33-39](../src/shaders/shaders.ts#L33-L39)). | It may fail or crawl on mobile and integrated GPUs, and light radius can't be changed per preset. The fix must land **before** the workload freeze. |
 | **Clustered deferred G-buffer** | World position stored in `rgba16float` ([clustered_deferred.fs.wgsl:34](../src/shaders/clustered_deferred.fs.wgsl#L34)). | Precision loss far from the origin, and wasted bandwidth. Reconstruct position from depth instead. |
 | **Product** | dat.gui + stats.js, alert/confirm dialogs, CSV auto-download. | No run flow, results page, history, or leaderboard. |
@@ -276,7 +276,10 @@ Ordered so everything that changes the workload lands before the freeze.
 1. **GpuContext refactor.** Remove the module globals, handle `device.lost`, request `timestamp-query` when available, and record adapter info and limits. **Done:** [src/gpu/context.ts](../src/gpu/context.ts).
 2. **Decouple the frame loop.** Techniques encode frames; drivers own the loop. Add offscreen targets plus the present blit. **Done:** [renderer.ts](../src/renderer.ts), [display_driver.ts](../src/drivers/display_driver.ts), [present.ts](../src/passes/present.ts). The throughput driver itself is §3.1.
 3. **Color pipeline.** sRGB base color, mipmap generation (render-pass downsample at load), `rgba16float` HDR lighting target, tonemap pass (ACES fit or AgX). **Done:** [mipmaps.ts](../src/gpu/mipmaps.ts), [tonemap.ts](../src/passes/tonemap.ts). Exposure is `toneMappingExposure` in [shaders.ts](../src/shaders/shaders.ts). Full mip chains raise Sponza's texture memory from ≈270 MB to ≈360 MB, which the §7 asset pipeline should bring down.
-4. **PBR + normal mapping.** Use the existing TANGENT attribute and metallic-roughness textures. Use alpha cutoff from the material rather than the hardcoded 0.5.
+4. **PBR + normal mapping.** Use the existing TANGENT attribute and metallic-roughness textures. Use alpha cutoff from the material rather than the hardcoded 0.5. **Done:** GGX + Lambert in [common.wgsl](../src/shaders/common.wgsl), material uniforms and default maps in [scene.ts](../src/stage/scene.ts), and normal mapping in [clustered_deferred.fs.wgsl](../src/shaders/clustered_deferred.fs.wgsl).
+   - Roughness and metallic ride in spare G-buffer channels (normal.w, albedo.a) until item 5 packs them properly.
+   - Applying glTF's `baseColorFactor` (0.588 on every Sponza material) darkened the frame, so exposure went from 1.0 to 1.7.
+   - Back-face culling for single-sided materials is still off. Turning it on would change the workload, so decide before the freeze.
 5. **G-buffer rework.** Reconstruct position from depth, store octahedral normals, pack roughness and metallic.
 6. **Clustering rewrite.**
    - Compute cluster AABBs only when the projection or resolution changes.
@@ -573,7 +576,7 @@ Owners follow the README's division of work. Integration, reviews, and device te
 
 **Week 2, Nov 2 – 8: Measurement core**
 - Charles: driver with warm-up, repeats, stats, flags, environment detection. JSON/CSV export. First telemetry collectors: Compute Pressure, refresh-rate and timer self-test, battery, wake lock, device memory.
-- Yiding: sRGB, mipmaps, HDR + tonemap (done), PBR + normal maps. Light count and radius as runtime values. Timestamp diagnostics. GPU allocation accounting and OOM error scopes in `GpuContext`.
+- Yiding: sRGB, mipmaps, HDR + tonemap, PBR + normal maps (all done). Light count and radius as runtime values. Timestamp diagnostics. GPU allocation accounting and OOM error scopes in `GpuContext`.
 - Eric: pre-flight, loading, running, and results pages wired to the engine.
 - Michael: IndexedDB history store, `POST`/`GET` results endpoints, D1 tables.
 - Stan: GT1 camera path authored. Interviews 1–2. Bake the VAT crowd clip.

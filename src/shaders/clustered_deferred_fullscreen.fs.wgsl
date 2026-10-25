@@ -29,6 +29,10 @@ fn main(in: FragmentInput) -> @location(0) vec4f
     let worldPos = positionData.xyz;
     let normal = normalize(normalData.xyz);
     let albedo = albedoData.rgb;
+    let metallic = albedoData.a;
+    // The floor keeps the GGX lobe from collapsing into an infinitely sharp, aliasing spike
+    let roughness = clamp(normalData.w, 0.045, 1.0);
+    let viewDir = normalize(cameraUniforms.cameraPos - worldPos);
 
     // Check if this is a background pixel (no geometry rendered)
     // Background will have position (0, 0, 0) and can be handled differently
@@ -62,10 +66,8 @@ fn main(in: FragmentInput) -> @location(0) vec4f
     for (var i = 0u; i < lightCount; i++) {
         let lightIdx = globalLightIndexList[lightOffset + i];
         let light = lightSet.lights[lightIdx];
-        totalLightContrib += calculateLightContrib(light, worldPos, normal);
+        totalLightContrib += calculateLightContrib(light, worldPos, normal, viewDir, albedo, metallic, roughness);
     }
 
-    // Apply lighting to albedo
-    let finalColor = albedo * totalLightContrib;
-    return vec4f(finalColor, 1.0);
+    return vec4f(totalLightContrib, 1.0);
 }

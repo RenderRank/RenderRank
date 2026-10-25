@@ -36,20 +36,54 @@ struct CameraUniforms {
     screenWidth: f32,
     screenHeight: f32,
     nearPlane: f32,
-    farPlane: f32
+    farPlane: f32,
+    cameraPos: vec3f // world space
 }
+
+const PI = 3.14159265359;
 
 // CHECKITOUT: this special attenuation function ensures lights don't affect geometry outside the maximum light radius
 fn rangeAttenuation(distance: f32) -> f32 {
     return clamp(1.f - pow(distance / ${lightRadius}, 4.f), 0.f, 1.f) / (distance * distance);
 }
 
-fn calculateLightContrib(light: Light, posWorld: vec3f, nor: vec3f) -> vec3f {
+// GGX / Trowbridge-Reitz normal distribution; alpha is perceptual roughness squared
+fn distributionGgx(NdotH: f32, alpha: f32) -> f32 {
+    let alpha2 = alpha * alpha;
+    let denom = NdotH * NdotH * (alpha2 - 1.f) + 1.f;
+    return alpha2 / (PI * denom * denom);
+}
+
+// Height-correlated Smith visibility for GGX. Includes the 1 / (4 NdotL NdotV) of the Cook-Torrance denominator.
+fn visibilitySmithGgxCorrelated(NdotV: f32, NdotL: f32, alpha: f32) -> f32 {
+    let alpha2 = alpha * alpha;
+    let ggxV = NdotL * sqrt(NdotV * NdotV * (1.f - alpha2) + alpha2);
+    let ggxL = NdotV * sqrt(NdotL * NdotL * (1.f - alpha2) + alpha2);
+    return 0.5f / (ggxV + ggxL);
+}
+
+// Metallic-roughness PBR for one point light: Lambert diffuse plus GGX specular, with Schlick Fresnel. Light color has
+// pi folded in (the usual real-time convention), so a white Lambert surface facing a light reflects color * attenuation.
+fn calculateLightContrib(light: Light, posWorld: vec3f, nor: vec3f, viewDir: vec3f,
+                         albedo: vec3f, metallic: f32, roughness: f32) -> vec3f {
     let vecToLight = light.pos - posWorld;
     let distToLight = length(vecToLight);
+    let lightDir = vecToLight / distToLight;
+    let halfDir = normalize(lightDir + viewDir);
 
-    let lambert = max(dot(nor, normalize(vecToLight)), 0.f);
-    return light.color * lambert * rangeAttenuation(distToLight);
+    let NdotL = max(dot(nor, lightDir), 0.f);
+    let NdotV = max(dot(nor, viewDir), 1e-4f);
+    let NdotH = max(dot(nor, halfDir), 0.f);
+    let VdotH = max(dot(viewDir, halfDir), 0.f);
+
+    let alpha = roughness * roughness;
+    let f0 = mix(vec3f(0.04f), albedo, metallic);
+    let fresnel = f0 + (1.f - f0) * pow(1.f - VdotH, 5.f);
+
+    let specular = distributionGgx(NdotH, alpha) * visibilitySmithGgxCorrelated(NdotV, NdotL, alpha) * fresnel;
+    let diffuse = (1.f - fresnel) * (1.f - metallic) * albedo / PI;
+
+    return (diffuse + specular) * PI * light.color * NdotL * rangeAttenuation(distToLight);
 }
 
 // Clustering utility functions

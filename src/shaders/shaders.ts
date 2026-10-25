@@ -39,8 +39,8 @@ export const constants = {
     maxLightsPerCluster: 1500,
     clusteringWorkgroupSize: 6,
 
-    // Scales HDR lighting before the tone curve
-    toneMappingExposure: 1
+    // Scales HDR lighting before the tone curve. Tuned by eye for Sponza at the current light intensity.
+    toneMappingExposure: 1.7
 };
 
 // =================================

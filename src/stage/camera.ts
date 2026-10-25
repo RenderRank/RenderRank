@@ -4,8 +4,9 @@ import { fovYDegrees, Resolution } from "../renderer";
 import { GpuContext } from "../gpu/context";
 
 class CameraUniforms {
-    // viewProjMat (16) + invProjMat (16) + viewMat (16) + screenWidth (1) + screenHeight (1) + nearPlane (1) + farPlane (1) = 52 floats
-    readonly buffer = new ArrayBuffer(52 * 4);
+    // viewProjMat (16) + invProjMat (16) + viewMat (16) + screenWidth (1) + screenHeight (1) + nearPlane (1) + farPlane (1)
+    // + cameraPos (3, padded to 4 since vec3f aligns to 16 bytes) = 56 floats
+    readonly buffer = new ArrayBuffer(56 * 4);
     private readonly floatView = new Float32Array(this.buffer);
 
     set viewProjMat(mat: Float32Array) {
@@ -40,6 +41,12 @@ class CameraUniforms {
 
     set farPlane(far: number) {
         this.floatView[51] = far;
+    }
+
+    set cameraPos(pos: Float32Array) {
+        for (let i = 0; i < 3; i++) {
+            this.floatView[52 + i] = pos[i];
+        }
     }
 }
 
@@ -183,6 +190,7 @@ export class Camera {
         this.uniforms.screenHeight = this.resolution.height;
         this.uniforms.nearPlane = Camera.nearPlane;
         this.uniforms.farPlane = Camera.farPlane;
+        this.uniforms.cameraPos = this.cameraPos;
 
         this.gpu.device.queue.writeBuffer(this.uniformsBuffer, 0, this.uniforms.buffer);
     }

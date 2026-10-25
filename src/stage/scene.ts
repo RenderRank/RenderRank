@@ -35,16 +35,48 @@ class Texture {
     }
 }
 
+// 1x1 stand-ins for maps a material doesn't have: they leave the material's factors unchanged
+interface DefaultTextures {
+    baseColor: Texture;         // white
+    normal: Texture;            // flat, pointing straight out of the surface
+    metallicRoughness: Texture; // white
+}
+
 export class Material {
     private static nextId = 0;
     readonly id: number;
 
+    materialUniformsBuffer: GPUBuffer;
     materialBindGroup: GPUBindGroup;
 
-    constructor(gpu: GpuContext, gltfMaterial: GLTFMaterial, textures: Texture[]) {
+    constructor(gpu: GpuContext, gltfMaterial: GLTFMaterial, textures: Texture[], defaults: DefaultTextures) {
         this.id = Material.nextId++;
 
-        const diffuseTexture = textures[gltfMaterial.pbrMetallicRoughness!.baseColorTexture!.index];
+        const pbr = gltfMaterial.pbrMetallicRoughness;
+        const baseColorTexture = pbr?.baseColorTexture ? textures[pbr.baseColorTexture.index] : defaults.baseColor;
+        const normalTexture = gltfMaterial.normalTexture ? textures[gltfMaterial.normalTexture.index] : defaults.normal;
+        const metallicRoughnessTexture = pbr?.metallicRoughnessTexture
+            ? textures[pbr.metallicRoughnessTexture.index] : defaults.metallicRoughness;
+
+        // glTF: OPAQUE ignores alpha, MASK cuts out below alphaCutoff. BLEND can't blend into a G-buffer, so it's cut
+        // out like MASK.
+        const alphaMode = gltfMaterial.alphaMode ?? 'OPAQUE';
+        const alphaCutoff = alphaMode === 'OPAQUE' ? 0 : (gltfMaterial.alphaCutoff ?? 0.5);
+
+        // Layout matches MaterialUniforms in clustered_deferred.fs.wgsl
+        const uniforms = new Float32Array([
+            ...(pbr?.baseColorFactor ?? [1, 1, 1, 1]),
+            pbr?.metallicFactor ?? 1,
+            pbr?.roughnessFactor ?? 1,
+            gltfMaterial.normalTexture?.scale ?? 1,
+            alphaCutoff
+        ]);
+        this.materialUniformsBuffer = gpu.device.createBuffer({
+            label: "material uniforms",
+            size: uniforms.byteLength,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        });
+        gpu.device.queue.writeBuffer(this.materialUniformsBuffer, 0, uniforms);
 
         this.materialBindGroup = gpu.device.createBindGroup({
             label: "material bind group",
@@ -52,11 +84,31 @@ export class Material {
             entries: [
                 {
                     binding: 0,
-                    resource: diffuseTexture.image.createView()
+                    resource: baseColorTexture.image.createView()
                 },
                 {
                     binding: 1,
-                    resource: diffuseTexture.sampler
+                    resource: baseColorTexture.sampler
+                },
+                {
+                    binding: 2,
+                    resource: normalTexture.image.createView()
+                },
+                {
+                    binding: 3,
+                    resource: normalTexture.sampler
+                },
+                {
+                    binding: 4,
+                    resource: metallicRoughnessTexture.image.createView()
+                },
+                {
+                    binding: 5,
+                    resource: metallicRoughnessTexture.sampler
+                },
+                {
+                    binding: 6,
+                    resource: { buffer: this.materialUniformsBuffer }
                 }
             ]
         });
@@ -99,8 +151,11 @@ export class Primitive {
         const positionsArray = getFloatArray(gltfWithBuffers, gltfPrim.attributes.POSITION);
         const normalsArray = getFloatArray(gltfWithBuffers, gltfPrim.attributes.NORMAL);
         const uvsArray = getFloatArray(gltfWithBuffers, gltfPrim.attributes.TEXCOORD_0);
+        // Left as zeros when missing; the G-buffer shader then skips normal mapping
+        const tangentsArray = gltfPrim.attributes.TANGENT != undefined
+            ? getFloatArray(gltfWithBuffers, gltfPrim.attributes.TANGENT) : undefined;
 
-        const numFloatsPerVert = 8;
+        const numFloatsPerVert = 12;
         const numVerts = positionsArray.length / 3;
         const vertsArray = new Float32Array(numVerts * numFloatsPerVert);
         for (let vertIdx = 0; vertIdx < numVerts; ++vertIdx) {
@@ -113,6 +168,12 @@ export class Primitive {
             vertsArray[vertStartIdx + 5] = normalsArray[vertIdx * 3 + 2];
             vertsArray[vertStartIdx + 6] = uvsArray[vertIdx * 2];
             vertsArray[vertStartIdx + 7] = uvsArray[vertIdx * 2 + 1];
+            if (tangentsArray != undefined) {
+                vertsArray[vertStartIdx + 8] = tangentsArray[vertIdx * 4];
+                vertsArray[vertStartIdx + 9] = tangentsArray[vertIdx * 4 + 1];
+                vertsArray[vertStartIdx + 10] = tangentsArray[vertIdx * 4 + 2];
+                vertsArray[vertStartIdx + 11] = tangentsArray[vertIdx * 4 + 3];
+            }
         }
 
         this.indexBuffer = device.createBuffer({
@@ -201,6 +262,18 @@ export class Node {
             child.propagateTransformations(gpu);
         }
     }
+}
+
+function createSolidTexture(device: GPUDevice, rgba: number[], format: GPUTextureFormat): GPUTexture {
+    let texture = device.createTexture({
+        size: [1, 1],
+        format: format,
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
+    });
+
+    device.queue.writeTexture({ texture: texture }, new Uint8Array(rgba), { bytesPerRow: 4 }, [1, 1]);
+
+    return texture;
 }
 
 function createTexture(device: GPUDevice, mipmaps: MipmapGenerator, imageBitmap: ImageBitmap,
@@ -325,9 +398,17 @@ export class Scene {
             }
         }
 
+        const device = this.gpu.device;
+        const defaultSampler = device.createSampler();
+        const defaultTextures: DefaultTextures = {
+            baseColor: new Texture(createSolidTexture(device, [255, 255, 255, 255], 'rgba8unorm-srgb'), defaultSampler),
+            normal: new Texture(createSolidTexture(device, [128, 128, 255, 255], 'rgba8unorm'), defaultSampler),
+            metallicRoughness: new Texture(createSolidTexture(device, [255, 255, 255, 255], 'rgba8unorm'), defaultSampler)
+        };
+
         let sceneMaterials: Material[] = [];
         for (let gltfMaterial of gltf.materials!) {
-            sceneMaterials.push(new Material(this.gpu, gltfMaterial, sceneTextures));
+            sceneMaterials.push(new Material(this.gpu, gltfMaterial, sceneTextures, defaultTextures));
         }
 
         let sceneMeshes: Mesh[] = [];
