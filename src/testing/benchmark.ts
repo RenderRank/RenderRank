@@ -1,5 +1,5 @@
 import { Stage } from '../stage/stage';
-import { setFrameTimeCallback } from '../renderer';
+import { DisplayDriver } from '../drivers/display_driver';
 
 export interface BenchmarkResult {
     numLights: number;
@@ -10,6 +10,7 @@ export interface BenchmarkResult {
 
 export class BenchmarkRunner {
     private stage: Stage;
+    private driver: DisplayDriver;
     private results: BenchmarkResult[] = [];
     private isRunning = false;
     private onProgressCallback?: (message: string) => void;
@@ -19,8 +20,9 @@ export class BenchmarkRunner {
     private frameTimes: number[] = [];
     private isCollecting = false;
 
-    constructor(stage: Stage) {
+    constructor(stage: Stage, driver: DisplayDriver) {
         this.stage = stage;
+        this.driver = driver;
     }
 
     setProgressCallback(callback: (message: string) => void) {
@@ -41,7 +43,7 @@ export class BenchmarkRunner {
         this.results = [];
 
         // Register frame time callback
-        setFrameTimeCallback((frameTime: number) => {
+        this.driver.setFrameTimeCallback((frameTime: number) => {
             this.captureFrameTime(frameTime);
         });
 
@@ -71,7 +73,7 @@ export class BenchmarkRunner {
 
         } finally {
             // Unregister frame time callback
-            setFrameTimeCallback(null);
+            this.driver.setFrameTimeCallback(null);
 
             // Restore original state
             this.stage.lights.numLights = originalNumLights;

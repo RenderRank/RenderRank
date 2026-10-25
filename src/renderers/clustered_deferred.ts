@@ -1,6 +1,7 @@
 import * as renderer from '../renderer';
 import * as shaders from '../shaders/shaders';
 import { Stage } from '../stage/stage';
+import { TonemapPass } from '../passes/tonemap';
 
 export class ClusteredDeferredRenderer extends renderer.Renderer {
     // G-buffer textures
@@ -16,6 +17,13 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
     depthTexture: GPUTexture;
     depthTextureView: GPUTextureView;
 
+    // Lighting accumulates here unclamped; the tonemap pass maps it to the output
+    hdrTexture: GPUTexture;
+    hdrTextureView: GPUTextureView;
+
+    tonemapPass: TonemapPass;
+    readonly outputTexture: GPUTexture;
+
     gBufferBindGroupLayout: GPUBindGroupLayout;
     gBufferBindGroup: GPUBindGroup;
 
@@ -30,33 +38,47 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
     constructor(stage: Stage) {
         super(stage);
 
+        const size = [this.resolution.width, this.resolution.height];
+
         this.gBufferPositionTexture = this.gpu.device.createTexture({
-            size: [this.gpu.canvas.width, this.gpu.canvas.height],
+            size: size,
             format: "rgba16float",
             usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
         });
         this.gBufferPositionTextureView = this.gBufferPositionTexture.createView();
 
         this.gBufferNormalTexture = this.gpu.device.createTexture({
-            size: [this.gpu.canvas.width, this.gpu.canvas.height],
+            size: size,
             format: "rgba16float",
             usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
         });
         this.gBufferNormalTextureView = this.gBufferNormalTexture.createView();
 
+        // -srgb so linear albedo keeps its precision in dark tones; it's encoded on write and decoded on read
         this.gBufferAlbedoTexture = this.gpu.device.createTexture({
-            size: [this.gpu.canvas.width, this.gpu.canvas.height],
-            format: "rgba8unorm",
+            size: size,
+            format: "rgba8unorm-srgb",
             usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
         });
         this.gBufferAlbedoTextureView = this.gBufferAlbedoTexture.createView();
 
         this.depthTexture = this.gpu.device.createTexture({
-            size: [this.gpu.canvas.width, this.gpu.canvas.height],
+            size: size,
             format: "depth24plus",
             usage: GPUTextureUsage.RENDER_ATTACHMENT
         });
         this.depthTextureView = this.depthTexture.createView();
+
+        this.hdrTexture = this.gpu.device.createTexture({
+            label: "HDR lighting",
+            size: size,
+            format: "rgba16float",
+            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
+        });
+        this.hdrTextureView = this.hdrTexture.createView();
+
+        this.tonemapPass = new TonemapPass(this.gpu, this.hdrTexture);
+        this.outputTexture = this.tonemapPass.outputTexture;
 
         this.gBufferSampler = this.gpu.device.createSampler({
             magFilter: "nearest",
@@ -205,7 +227,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                         format: "rgba16float" // normal
                     },
                     {
-                        format: "rgba8unorm" // albedo
+                        format: "rgba8unorm-srgb" // albedo
                     }
                 ]
             }
@@ -222,7 +244,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
             vertex: {
                 module: this.gpu.device.createShaderModule({
                     label: "clustered deferred fullscreen vert shader",
-                    code: shaders.clusteredDeferredFullscreenVertSrc
+                    code: shaders.fullscreenVertSrc
                 })
             },
             fragment: {
@@ -232,16 +254,14 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                 }),
                 targets: [
                     {
-                        format: this.gpu.canvasFormat
+                        format: "rgba16float" // HDR lighting
                     }
                 ]
             }
         });
     }
 
-    override draw() {
-        const encoder = this.gpu.device.createCommandEncoder();
-
+    override encodeFrame(encoder: GPUCommandEncoder) {
         // Run clustering compute shader
         this.lights.doLightClustering(encoder);
 
@@ -292,13 +312,11 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
         gBufferPass.end();
 
         // Fullscreen lighting pass
-        const canvasTextureView = this.gpu.canvasContext.getCurrentTexture().createView();
-
         const fullscreenPass = encoder.beginRenderPass({
             label: "clustered deferred fullscreen pass",
             colorAttachments: [
                 {
-                    view: canvasTextureView,
+                    view: this.hdrTextureView,
                     clearValue: [0, 0, 0, 0],
                     loadOp: "clear",
                     storeOp: "store"
@@ -312,6 +330,6 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
 
         fullscreenPass.end();
 
-        this.gpu.device.queue.submit([encoder.finish()]);
+        this.tonemapPass.encode(encoder);
     }
 }

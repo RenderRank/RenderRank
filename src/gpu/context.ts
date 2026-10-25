@@ -97,10 +97,9 @@ export class GpuContext {
         });
 
         this.canvas = canvas;
-
-        const devicePixelRatio = window.devicePixelRatio;
-        canvas.width = canvas.clientWidth * devicePixelRatio;
-        canvas.height = canvas.clientHeight * devicePixelRatio;
+        this.resizeCanvas();
+        // Frames render offscreen at a fixed resolution, so resizing only changes the final present blit
+        new ResizeObserver(() => this.resizeCanvas()).observe(canvas);
 
         this.canvasContext = canvas.getContext("webgpu")!;
         this.canvasFormat = navigator.gpu.getPreferredCanvasFormat();
@@ -139,7 +138,10 @@ export class GpuContext {
         });
     }
 
-    get aspectRatio(): number {
-        return this.canvas.width / this.canvas.height;
+    // Matches the canvas backing store to its on-screen size in device pixels
+    private resizeCanvas() {
+        const devicePixelRatio = window.devicePixelRatio;
+        this.canvas.width = Math.max(1, Math.floor(this.canvas.clientWidth * devicePixelRatio));
+        this.canvas.height = Math.max(1, Math.floor(this.canvas.clientHeight * devicePixelRatio));
     }
 }

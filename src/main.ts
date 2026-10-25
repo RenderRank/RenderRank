@@ -3,6 +3,7 @@ import { GUI } from 'dat.gui';
 
 import { GpuContext } from './gpu/context';
 import { ClusteredDeferredRenderer } from './renderers/clustered_deferred';
+import { DisplayDriver } from './drivers/display_driver';
 
 import { setupLoaders, Scene } from './stage/scene';
 import { Lights } from './stage/lights';
@@ -29,7 +30,10 @@ setupLoaders();
 let scene = new Scene(gpu);
 await scene.loadGltf('./scenes/sponza/Sponza.gltf');
 
-const camera = new Camera(gpu);
+// Frames always render at this size and get scaled to fit the canvas, so window size doesn't change the workload
+const renderResolution = { width: 1920, height: 1080 };
+
+const camera = new Camera(gpu, renderResolution);
 const lights = new Lights(gpu, camera);
 
 const stats = new Stats();
@@ -41,18 +45,20 @@ gui.add(lights, 'numLights').min(1).max(Lights.maxNumLights).step(1).onChange(()
     lights.updateLightSetUniformNumLights();
 });
 
-const stage = new Stage(gpu, scene, lights, camera, stats);
+const stage = new Stage(gpu, renderResolution, scene, lights, camera, stats);
 
 const renderer = new ClusteredDeferredRenderer(stage);
+const driver = new DisplayDriver(stage, renderer);
+driver.start();
 
 // Every GPU resource dies with the device, so stop drawing and tell the user instead of showing a frozen frame
 gpu.lost.then((info) => {
-    renderer.stop();
+    driver.stop();
     showFatalError(`The GPU device was lost (${info.message || info.reason}). Reload the page to try again.`);
 });
 
 // Setup benchmark runner
-const benchmarkRunner = new BenchmarkRunner(stage);
+const benchmarkRunner = new BenchmarkRunner(stage, driver);
 
 // Add progress display element
 const progressDiv = document.createElement('div');

@@ -61,12 +61,12 @@ The gaps that matter for a benchmark:
 
 | Area | Current state | Why it matters |
 | --- | --- | --- |
-| **Vsync cap** | Frame time is the interval between `requestAnimationFrame` callbacks ([renderer.ts:81-91](../src/renderer.ts#L81-L91)). In [img/benchmark_rtx5080.csv](../img/benchmark_rtx5080.csv), Forward+ and clustered deferred both floor at 8.33 ms (120 Hz) and step at 16.7/25/33 ms. | We're measuring the display, not the GPU. Every fast result collapses to the refresh rate. **This is the #1 blocker.** |
-| **Resolution** | Canvas = CSS size × `devicePixelRatio` ([context.ts:101-103](../src/gpu/context.ts#L101-L103)). There's no resize handling, and G-buffers are sized once. | Two identical GPUs with different windows or displays get different scores. |
-| **Determinism** | Light colors use `Math.random()` ([lights.ts:202](../src/stage/lights.ts#L202)). Light motion is driven by wall-clock rAF time ([lights.ts:231-232](../src/stage/lights.ts#L231-L232)). The camera is keyboard/mouse only ([camera.ts:125](../src/stage/camera.ts#L125)). | The workload differs from run to run. |
-| **Protocol** | 30 warm-up frames, 120 sample frames, one pass, min/avg/max only ([benchmark.ts:103-109](../src/testing/benchmark.ts#L103-L109)). Pipelines compile synchronously when the renderer is constructed. | Too short to be stable. No percentiles or variance. Shader-compile hitches land in the measured window. |
-| **Architecture** | Each `Renderer` starts its own rAF loop in the constructor ([renderer.ts:55](../src/renderer.ts#L55)). The module-level globals (`device`, `canvas`…) were replaced by `GpuContext` in §6.1. | The benchmark can't own the frame loop until §6.2 lands. |
-| **Materials** | Only base color is used ([scene.ts:46](../src/stage/scene.ts#L46)). Sponza ships normal and metallic-roughness maps plus tangents, all unused. Textures are `rgba8unorm` (not sRGB) with no mipmaps ([scene.ts:205-208](../src/stage/scene.ts#L205-L208)), even though the sampler asks for trilinear filtering. No HDR or tonemapping. | It looks dated, and it under-represents the texture bandwidth a modern workload has. |
+| **Vsync cap** | Frame time is the interval between `requestAnimationFrame` callbacks ([display_driver.ts:41-60](../src/drivers/display_driver.ts#L41-L60)). In [img/benchmark_rtx5080.csv](../img/benchmark_rtx5080.csv), Forward+ and clustered deferred both floor at 8.33 ms (120 Hz) and step at 16.7/25/33 ms. | We're measuring the display, not the GPU. Every fast result collapses to the refresh rate. **This is the #1 blocker.** |
+| **Resolution** | Fixed in §6.2. Frames render offscreen at 1920×1080 ([main.ts](../src/main.ts)) and are letterboxed onto the canvas, which follows window resizes. | Per-tier resolutions (§3.2) still need presets. |
+| **Determinism** | Light colors use `Math.random()` ([lights.ts:204](../src/stage/lights.ts#L204)). Light motion is driven by wall-clock rAF time ([lights.ts:233-234](../src/stage/lights.ts#L233-L234)). The camera is keyboard/mouse only ([camera.ts:134](../src/stage/camera.ts#L134)). | The workload differs from run to run. |
+| **Protocol** | 30 warm-up frames, 120 sample frames, one pass, min/avg/max only ([benchmark.ts:86-92](../src/testing/benchmark.ts#L86-L92)). Pipelines compile synchronously when the renderer is constructed. | Too short to be stable. No percentiles or variance. Shader-compile hitches land in the measured window. |
+| **Architecture** | Fixed in §6.1–6.2. `GpuContext` replaced the module-level globals. Renderers only encode frames, and a `DisplayDriver` ([display_driver.ts](../src/drivers/display_driver.ts)) owns the rAF loop. | The uncapped throughput driver (§3.1) still needs building on top. |
+| **Materials** | Only base color is used ([scene.ts:47](../src/stage/scene.ts#L47)). Sponza ships normal and metallic-roughness maps plus tangents, all unused. (sRGB textures, mipmaps, HDR, and tonemapping landed in §6.3.) | It looks dated, and it under-represents the texture bandwidth a modern workload has. |
 | **Clustering cost** | Each thread loops over all lights and keeps a private `array<u32, 1500>`, which is 6 KB per invocation ([clustering.cs.wgsl:97-100](../src/shaders/clustering.cs.wgsl#L97-L100)). The global index list reserves 3,456 × 1,500 slots (≈21 MB). Light radius and cluster dimensions are compile-time constants ([shaders.ts:33-39](../src/shaders/shaders.ts#L33-L39)). | It may fail or crawl on mobile and integrated GPUs, and light radius can't be changed per preset. The fix must land **before** the workload freeze. |
 | **Clustered deferred G-buffer** | World position stored in `rgba16float` ([clustered_deferred.fs.wgsl:34](../src/shaders/clustered_deferred.fs.wgsl#L34)). | Precision loss far from the origin, and wasted bandwidth. Reconstruct position from depth instead. |
 | **Product** | dat.gui + stats.js, alert/confirm dialogs, CSV auto-download. | No run flow, results page, history, or leaderboard. |
@@ -274,8 +274,8 @@ Uniform data that varies by preset (light count, light radius, cluster dimension
 Ordered so everything that changes the workload lands before the freeze.
 
 1. **GpuContext refactor.** Remove the module globals, handle `device.lost`, request `timestamp-query` when available, and record adapter info and limits. **Done:** [src/gpu/context.ts](../src/gpu/context.ts).
-2. **Decouple the frame loop.** Techniques encode frames; drivers own the loop. Add offscreen targets plus the present blit.
-3. **Color pipeline.** sRGB base color, mipmap generation (render-pass downsample at load), `rgba16float` HDR lighting target, tonemap pass (ACES fit or AgX).
+2. **Decouple the frame loop.** Techniques encode frames; drivers own the loop. Add offscreen targets plus the present blit. **Done:** [renderer.ts](../src/renderer.ts), [display_driver.ts](../src/drivers/display_driver.ts), [present.ts](../src/passes/present.ts). The throughput driver itself is §3.1.
+3. **Color pipeline.** sRGB base color, mipmap generation (render-pass downsample at load), `rgba16float` HDR lighting target, tonemap pass (ACES fit or AgX). **Done:** [mipmaps.ts](../src/gpu/mipmaps.ts), [tonemap.ts](../src/passes/tonemap.ts). Exposure is `toneMappingExposure` in [shaders.ts](../src/shaders/shaders.ts). Full mip chains raise Sponza's texture memory from ≈270 MB to ≈360 MB, which the §7 asset pipeline should bring down.
 4. **PBR + normal mapping.** Use the existing TANGENT attribute and metallic-roughness textures. Use alpha cutoff from the material rather than the hardcoded 0.5.
 5. **G-buffer rework.** Reconstruct position from depth, store octahedral normals, pack roughness and metallic.
 6. **Clustering rewrite.**
@@ -565,7 +565,7 @@ Owners follow the README's division of work. Integration, reviews, and device te
 
 **Week 1, Oct 26 – Nov 1: Foundations and spikes**
 - Everyone: review this plan and settle the [open decisions](#15-open-decisions).
-- Yiding: `GpuContext` refactor (done), loop decoupling, offscreen targets + present blit. Fix the 5 `tsc` errors.
+- Yiding: `GpuContext` refactor, loop decoupling, offscreen targets + present blit (all done). Fix the 5 `tsc` errors.
 - Charles: **throughput-loop spike on ≥3 browser/device pairs** (go/no-go for §3.1). Seeded PRNG, timeline clock.
 - Eric: app shell, routing, wireframes for run and results pages.
 - Michael: `shared/` schema v0, backend skeleton deployed with COOP/COEP headers, CI with type-check.
@@ -573,7 +573,7 @@ Owners follow the README's division of work. Integration, reviews, and device te
 
 **Week 2, Nov 2 – 8: Measurement core**
 - Charles: driver with warm-up, repeats, stats, flags, environment detection. JSON/CSV export. First telemetry collectors: Compute Pressure, refresh-rate and timer self-test, battery, wake lock, device memory.
-- Yiding: sRGB, mipmaps, HDR + tonemap, PBR + normal maps. Light count and radius as runtime values. Timestamp diagnostics. GPU allocation accounting and OOM error scopes in `GpuContext`.
+- Yiding: sRGB, mipmaps, HDR + tonemap (done), PBR + normal maps. Light count and radius as runtime values. Timestamp diagnostics. GPU allocation accounting and OOM error scopes in `GpuContext`.
 - Eric: pre-flight, loading, running, and results pages wired to the engine.
 - Michael: IndexedDB history store, `POST`/`GET` results endpoints, D1 tables.
 - Stan: GT1 camera path authored. Interviews 1–2. Bake the VAT crowd clip.

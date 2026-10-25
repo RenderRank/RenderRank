@@ -10,6 +10,7 @@ import { GLTFLoader, GLTFWithBuffers, GLTFMesh, GLTFMeshPrimitive, GLTFMaterial,
 import { ImageLoader } from '@loaders.gl/images';
 import { Mat4, mat4 } from 'wgpu-matrix';
 import { GpuContext } from '../gpu/context';
+import { MipmapGenerator, mipLevelCount } from '../gpu/mipmaps';
 
 export function setupLoaders() {
     registerLoaders([GLTFLoader, ImageLoader]);
@@ -202,10 +203,12 @@ export class Node {
     }
 }
 
-function createTexture(device: GPUDevice, imageBitmap: ImageBitmap): GPUTexture {
+function createTexture(device: GPUDevice, mipmaps: MipmapGenerator, imageBitmap: ImageBitmap,
+    format: GPUTextureFormat): GPUTexture {
     let texture = device.createTexture({
         size: [imageBitmap.width, imageBitmap.height],
-        format: 'rgba8unorm',
+        format: format,
+        mipLevelCount: mipLevelCount(imageBitmap.width, imageBitmap.height),
         usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT
     });
 
@@ -214,6 +217,8 @@ function createTexture(device: GPUDevice, imageBitmap: ImageBitmap): GPUTexture 
         { texture: texture },
         { width: imageBitmap.width, height: imageBitmap.height }
     );
+
+    mipmaps.generate(texture);
 
     return texture;
 }
@@ -293,9 +298,21 @@ export class Scene {
 
         let sceneTextures: Texture[] = [];
         {
+            // Base color images hold sRGB-encoded color, so sampling them has to decode to linear. Every other map
+            // (normals, metallic-roughness) holds linear data and is stored as-is.
+            let srgbImageIndices = new Set<number>();
+            for (let gltfMaterial of gltf.materials!) {
+                const baseColorTexture = gltfMaterial.pbrMetallicRoughness?.baseColorTexture;
+                if (baseColorTexture != undefined) {
+                    srgbImageIndices.add(gltf.textures![baseColorTexture.index].source!);
+                }
+            }
+
+            const mipmaps = new MipmapGenerator(this.gpu.device);
             let sceneImages: GPUTexture[] = [];
-            for (let gltfImage of gltfWithBuffers.images!) {
-                sceneImages.push(createTexture(this.gpu.device, gltfImage as ImageBitmap))
+            for (let imageIdx = 0; imageIdx < gltfWithBuffers.images!.length; ++imageIdx) {
+                const format = srgbImageIndices.has(imageIdx) ? 'rgba8unorm-srgb' : 'rgba8unorm';
+                sceneImages.push(createTexture(this.gpu.device, mipmaps, gltfWithBuffers.images![imageIdx] as ImageBitmap, format));
             }
 
             let sceneSamplers: GPUSampler[] = [];

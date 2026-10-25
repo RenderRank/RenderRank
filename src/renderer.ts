@@ -6,6 +6,11 @@ import { GpuContext } from './gpu/context';
 
 export const fovYDegrees = 45;
 
+export interface Resolution {
+    width: number;
+    height: number;
+}
+
 export const vertexBufferLayout: GPUVertexBufferLayout = {
     arrayStride: 32,
     attributes: [
@@ -27,67 +32,26 @@ export const vertexBufferLayout: GPUVertexBufferLayout = {
     ]
 };
 
-let frameTimeCallback: ((frameTime: number) => void) | null = null;
-
-export function setFrameTimeCallback(callback: ((frameTime: number) => void) | null) {
-    frameTimeCallback = callback;
-}
-
+// A rendering technique. It renders into its own offscreen targets at the stage's fixed resolution and never touches
+// the canvas; a driver decides when frames run and when they're presented.
 export abstract class Renderer {
     protected gpu: GpuContext;
+    protected resolution: Resolution;
     protected scene: Scene;
     protected lights: Lights;
     protected camera: Camera;
 
-    protected stats: Stats;
-
-    private prevTime: number = 0;
-    private prevFrameTime: number = 0;
-    private frameRequestId: number;
+    // The finished frame: tonemapped and sRGB-encoded, at the stage's resolution
+    abstract readonly outputTexture: GPUTexture;
 
     constructor(stage: Stage) {
         this.gpu = stage.gpu;
+        this.resolution = stage.resolution;
         this.scene = stage.scene;
         this.lights = stage.lights;
         this.camera = stage.camera;
-        this.stats = stage.stats;
-
-        this.frameRequestId = requestAnimationFrame((t) => this.onFrame(t));
     }
 
-    stop(): void {
-        cancelAnimationFrame(this.frameRequestId);
-    }
-
-    protected abstract draw(): void;
-
-    // CHECKITOUT: this is the main rendering loop
-    private onFrame(time: number) {
-        if (this.prevTime == 0) {
-            this.prevTime = time;
-            this.prevFrameTime = time;
-        }
-
-        let deltaTime = time - this.prevTime;
-        this.camera.onFrame(deltaTime);
-        this.lights.onFrame(time);
-
-        this.stats.begin();
-
-        this.draw();
-
-        this.stats.end();
-
-        // Calculate actual frame time (time between frames)
-        const frameTime = time - this.prevFrameTime;
-
-        // Call frame time callback if registered
-        if (frameTimeCallback && this.prevFrameTime !== 0) {
-            frameTimeCallback(frameTime);
-        }
-
-        this.prevTime = time;
-        this.prevFrameTime = time;
-        this.frameRequestId = requestAnimationFrame((t) => this.onFrame(t));
-    }
+    // Records every pass of one frame into the encoder. The caller submits it.
+    abstract encodeFrame(encoder: GPUCommandEncoder): void;
 }

@@ -87,7 +87,7 @@ Code reviews, device testing, integration, and presentation preparation are shar
 
 ## Current state of the code
 
-The codebase starts from a WebGPU renderer (TypeScript + Vite) that draws the Sponza atrium lit by many moving point lights. It uses **clustered deferred** shading: a compute pass bins lights into a 3D grid of view-frustum clusters, and a full-screen pass shades a G-buffer using only each cluster's lights.
+The codebase starts from a WebGPU renderer (TypeScript + Vite) that draws the Sponza atrium lit by many moving point lights. It uses **clustered deferred** shading: a compute pass bins lights into a 3D grid of view-frustum clusters, and a full-screen pass shades a G-buffer using only each cluster's lights. Frames render offscreen at a fixed 1920×1080 in HDR, go through an ACES tonemap, and are scaled to fit the window.
 
 The original naive and Forward+ renderers were removed because no benchmark test uses them. They're still in git history.
 
@@ -108,9 +108,11 @@ npm run build   # production build to dist/ (the scenes/ folder is copied in too
 ```
 src/
   main.ts           entry point: WebGPU init, scene loading, GUI
-  gpu/              GpuContext: adapter, device, canvas setup, and recorded adapter info
-  renderer.ts       shared renderer base and frame loop
+  gpu/              GpuContext (adapter, device, canvas, recorded adapter info) and mipmap generation
+  renderer.ts       renderer base: encodes frames into offscreen targets at a fixed resolution
   renderers/        clustered deferred renderer
+  passes/           shared passes: tonemap, present (scaled blit to the canvas)
+  drivers/          frame loops; DisplayDriver is the rAF-paced one
   shaders/          WGSL shaders and the constants injected into them
   stage/            camera, lights, and glTF scene loading
   testing/          benchmark runner

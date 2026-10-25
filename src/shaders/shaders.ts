@@ -4,10 +4,14 @@ import { Camera } from '../stage/camera';
 
 import commonRaw from './common.wgsl?raw';
 
+import fullscreenVertRaw from './fullscreen.vs.wgsl?raw';
+import blitFragRaw from './blit.fs.wgsl?raw';
+
 import clusteredDeferredVertRaw from './clustered_deferred.vs.wgsl?raw';
 import clusteredDeferredFragRaw from './clustered_deferred.fs.wgsl?raw';
-import clusteredDeferredFullscreenVertRaw from './clustered_deferred_fullscreen.vs.wgsl?raw';
 import clusteredDeferredFullscreenFragRaw from './clustered_deferred_fullscreen.fs.wgsl?raw';
+
+import tonemapFragRaw from './tonemap.fs.wgsl?raw';
 
 import moveLightsComputeRaw from './move_lights.cs.wgsl?raw';
 import clusteringComputeRaw from './clustering.cs.wgsl?raw';
@@ -33,7 +37,10 @@ export const constants = {
     clusterHeight: 9,
     clusterDepth: 24,
     maxLightsPerCluster: 1500,
-    clusteringWorkgroupSize: 6
+    clusteringWorkgroupSize: 6,
+
+    // Scales HDR lighting before the tone curve
+    toneMappingExposure: 1
 };
 
 // =================================
@@ -50,10 +57,14 @@ function processShaderRaw(raw: string) {
     return commonSrc + evalShaderRaw(raw);
 }
 
+export const fullscreenVertSrc: string = processShaderRaw(fullscreenVertRaw);
+export const blitFragSrc: string = processShaderRaw(blitFragRaw);
+
 export const clusteredDeferredVertSrc: string = processShaderRaw(clusteredDeferredVertRaw);
 export const clusteredDeferredFragSrc: string = processShaderRaw(clusteredDeferredFragRaw);
-export const clusteredDeferredFullscreenVertSrc: string = processShaderRaw(clusteredDeferredFullscreenVertRaw);
 export const clusteredDeferredFullscreenFragSrc: string = processShaderRaw(clusteredDeferredFullscreenFragRaw);
+
+export const tonemapFragSrc: string = processShaderRaw(tonemapFragRaw);
 
 export const moveLightsComputeSrc: string = processShaderRaw(moveLightsComputeRaw);
 export const clusteringComputeSrc: string = processShaderRaw(clusteringComputeRaw);

@@ -1,6 +1,6 @@
 import { Mat4, mat4, Vec3, vec3 } from "wgpu-matrix";
 import { toRadians } from "../math_util";
-import { fovYDegrees } from "../renderer";
+import { fovYDegrees, Resolution } from "../renderer";
 import { GpuContext } from "../gpu/context";
 
 class CameraUniforms {
@@ -45,6 +45,7 @@ class CameraUniforms {
 
 export class Camera {
     private gpu: GpuContext;
+    private resolution: Resolution;
 
     uniforms: CameraUniforms = new CameraUniforms();
     uniformsBuffer: GPUBuffer;
@@ -65,8 +66,10 @@ export class Camera {
 
     keys: { [key: string]: boolean } = {};
 
-    constructor (gpu: GpuContext) {
+    // resolution is the render target size, not the canvas size
+    constructor (gpu: GpuContext, resolution: Resolution) {
         this.gpu = gpu;
+        this.resolution = resolution;
 
         // TODO-1.1: set `this.uniformsBuffer` to a new buffer of size `this.uniforms.buffer.byteLength`
         // ensure the usage is set to `GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST` since we will be copying to this buffer
@@ -79,7 +82,8 @@ export class Camera {
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
         });
 
-        this.projMat = mat4.perspective(toRadians(fovYDegrees), gpu.aspectRatio, Camera.nearPlane, Camera.farPlane);
+        const aspectRatio = resolution.width / resolution.height;
+        this.projMat = mat4.perspective(toRadians(fovYDegrees), aspectRatio, Camera.nearPlane, Camera.farPlane);
         this.invProjMat = mat4.invert(this.projMat);
 
         this.rotateCamera(0, 0); // set initial camera vectors
@@ -175,8 +179,8 @@ export class Camera {
         const invProjMat = mat4.invert(this.projMat);
         this.uniforms.invProjMat = invProjMat;
         this.uniforms.viewMat = viewMat;
-        this.uniforms.screenWidth = this.gpu.canvas.width;
-        this.uniforms.screenHeight = this.gpu.canvas.height;
+        this.uniforms.screenWidth = this.resolution.width;
+        this.uniforms.screenHeight = this.resolution.height;
         this.uniforms.nearPlane = Camera.nearPlane;
         this.uniforms.farPlane = Camera.farPlane;
 
