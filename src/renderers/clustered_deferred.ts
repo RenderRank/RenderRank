@@ -188,7 +188,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
             vertex: {
                 module: this.gpu.device.createShaderModule({
                     label: "clustered deferred G-buffer vert shader",
-                    code: shaders.naiveVertSrc
+                    code: shaders.clusteredDeferredVertSrc
                 }),
                 buffers: [ renderer.vertexBufferLayout ]
             },

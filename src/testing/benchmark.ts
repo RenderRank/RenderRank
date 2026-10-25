@@ -1,8 +1,7 @@
 import { Stage } from '../stage/stage';
-import { Renderer, setFrameTimeCallback } from '../renderer';
+import { setFrameTimeCallback } from '../renderer';
 
 export interface BenchmarkResult {
-    renderMode: string;
     numLights: number;
     avgFrameTimeMs: number;
     minFrameTimeMs: number;
@@ -11,7 +10,6 @@ export interface BenchmarkResult {
 
 export class BenchmarkRunner {
     private stage: Stage;
-    private rendererFactory: (mode: string) => Renderer | undefined;
     private results: BenchmarkResult[] = [];
     private isRunning = false;
     private onProgressCallback?: (message: string) => void;
@@ -21,12 +19,8 @@ export class BenchmarkRunner {
     private frameTimes: number[] = [];
     private isCollecting = false;
 
-    constructor(
-        stage: Stage,
-        rendererFactory: (mode: string) => Renderer | undefined
-    ) {
+    constructor(stage: Stage) {
         this.stage = stage;
-        this.rendererFactory = rendererFactory;
     }
 
     setProgressCallback(callback: (message: string) => void) {
@@ -51,31 +45,22 @@ export class BenchmarkRunner {
             this.captureFrameTime(frameTime);
         });
 
-        const renderModes = ['naive', 'forward+', 'clustered deferred'];
         const lightCounts = [500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000];
 
         // Save original state
         const originalNumLights = this.stage.lights.numLights;
 
         try {
-            for (const mode of renderModes) {
-                this.log(`Testing ${mode} renderer...`);
+            for (const numLights of lightCounts) {
+                this.log(`Testing with ${numLights} lights...`);
 
-                this.rendererFactory(mode);
+                this.stage.lights.numLights = numLights;
+                this.stage.lights.updateLightSetUniformNumLights();
 
-                await this.delay(200);
+                const result = await this.benchmarkConfiguration(numLights);
+                this.results.push(result);
 
-                for (const numLights of lightCounts) {
-                    this.log(`  Testing with ${numLights} lights...`);
-
-                    this.stage.lights.numLights = numLights;
-                    this.stage.lights.updateLightSetUniformNumLights();
-
-                    const result = await this.benchmarkConfiguration(mode, numLights);
-                    this.results.push(result);
-
-                    this.log(`    Avg: ${result.avgFrameTimeMs.toFixed(2)}ms, Min: ${result.minFrameTimeMs.toFixed(2)}ms, Max: ${result.maxFrameTimeMs.toFixed(2)}ms`);
-                }
+                this.log(`  Avg: ${result.avgFrameTimeMs.toFixed(2)}ms, Min: ${result.minFrameTimeMs.toFixed(2)}ms, Max: ${result.maxFrameTimeMs.toFixed(2)}ms`);
             }
 
             this.log('Benchmark complete! Generating CSV...');
@@ -95,11 +80,7 @@ export class BenchmarkRunner {
         }
     }
 
-    private delay(ms: number): Promise<void> {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-
-    private async benchmarkConfiguration(renderMode: string, numLights: number): Promise<BenchmarkResult> {
+    private async benchmarkConfiguration(numLights: number): Promise<BenchmarkResult> {
         await this.waitFrames(30);
 
         this.frameTimes = [];
@@ -115,7 +96,6 @@ export class BenchmarkRunner {
         const maxFrameTime = Math.max(...this.frameTimes);
 
         return {
-            renderMode,
             numLights,
             avgFrameTimeMs: avgFrameTime,
             minFrameTimeMs: minFrameTime,
@@ -175,11 +155,11 @@ export class BenchmarkRunner {
         }
 
         // CSV header
-        let csv = 'Render Mode,Number of Lights,Average Frame Time (ms),Min Frame Time (ms),Max Frame Time (ms)\n';
+        let csv = 'Number of Lights,Average Frame Time (ms),Min Frame Time (ms),Max Frame Time (ms)\n';
 
         // CSV rows
         for (const result of this.results) {
-            csv += `${result.renderMode},${result.numLights},${result.avgFrameTimeMs.toFixed(3)},${result.minFrameTimeMs.toFixed(3)},${result.maxFrameTimeMs.toFixed(3)}\n`;
+            csv += `${result.numLights},${result.avgFrameTimeMs.toFixed(3)},${result.minFrameTimeMs.toFixed(3)},${result.maxFrameTimeMs.toFixed(3)}\n`;
         }
 
         return csv;

@@ -1,4 +1,5 @@
-// CHECKITOUT: you can use this vertex shader for all of the renderers
+// Clustered Deferred G-buffer vertex shader
+// Transforms scene geometry and passes world-space position, normal, and UV to the G-buffer fragment shader
 
 // TODO-1.3: add a uniform variable here for camera uniforms (of type CameraUniforms)
 // make sure to use ${bindGroup_scene} for the group

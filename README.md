@@ -87,11 +87,9 @@ Code reviews, device testing, integration, and presentation preparation are shar
 
 ## Current state of the code
 
-The codebase starts from a WebGPU renderer (TypeScript + Vite) that draws the Sponza atrium lit by many moving point lights. It has three interchangeable renderers:
+The codebase starts from a WebGPU renderer (TypeScript + Vite) that draws the Sponza atrium lit by many moving point lights. It uses **clustered deferred** shading: a compute pass bins lights into a 3D grid of view-frustum clusters, and a full-screen pass shades a G-buffer using only each cluster's lights.
 
-- **Naive forward:** every fragment evaluates every light. This is the baseline.
-- **Forward+:** a compute pass bins lights into a 3D grid of view-frustum clusters, and the forward pass shades each fragment using only its cluster's lights.
-- **Clustered deferred:** the same clustering, but shading runs in a full-screen pass over a G-buffer.
+The original naive and Forward+ renderers were removed because no benchmark test uses them. They're still in git history.
 
 It also has a basic frame-time benchmark runner in `src/testing/benchmark.ts`. The scene controls, fixed-run protocol, result storage, and leaderboard described above are still to be built.
 
@@ -110,8 +108,9 @@ npm run build   # production build to dist/ (the scenes/ folder is copied in too
 ```
 src/
   main.ts           entry point: WebGPU init, scene loading, GUI
-  renderer.ts       shared renderer base and WebGPU setup
-  renderers/        naive, Forward+, and clustered deferred renderers
+  gpu/              GpuContext: adapter, device, canvas setup, and recorded adapter info
+  renderer.ts       shared renderer base and frame loop
+  renderers/        clustered deferred renderer
   shaders/          WGSL shaders and the constants injected into them
   stage/            camera, lights, and glTF scene loading
   testing/          benchmark runner

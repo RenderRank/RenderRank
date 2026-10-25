@@ -51,7 +51,7 @@ The late-October alpha milestone in the README isn't reachable from the current 
 
 What we can build on:
 
-- Three renderers sharing one scene: naive, Forward+, and clustered deferred ([src/renderers/](../src/renderers/)).
+- A clustered deferred renderer ([src/renderers/](../src/renderers/)). The original naive and Forward+ renderers were removed because no test uses them; git history has them.
 - A GPU light-clustering compute pass ([clustering.cs.wgsl](../src/shaders/clustering.cs.wgsl)) and GPU light animation ([move_lights.cs.wgsl](../src/shaders/move_lights.cs.wgsl)).
 - A glTF loader and scene graph ([scene.ts](../src/stage/scene.ts)), Sponza (262k triangles, 103 primitives, 25 materials, 69 textures, 51 MB on disk).
 - A light-count sweep benchmark with CSV export ([benchmark.ts](../src/testing/benchmark.ts)).
@@ -211,7 +211,7 @@ Both tests use Sponza for v1, which keeps asset work manageable. They stress dif
 
 **Light must run on default WebGPU limits.** It's the cross-platform tier, the equivalent of 3DMark's Wild Life, and the only one we expect phones to run.
 
-**Custom runs** expose every preset knob: resolution, light count, light radius, cluster dimensions, shadows, SSAO, bloom, crowd size, and lighting technique (naive / Forward+ / deferred). Custom results are always labeled and never ranked. Keeping naive and Forward+ as technique options gives web developers a built-in "what does clustering buy me?" comparison.
+**Custom runs** expose every preset knob: resolution, light count, light radius, cluster dimensions, shadows, SSAO, bloom, and crowd size. Custom results are always labeled and never ranked.
 
 ---
 
@@ -225,7 +225,7 @@ src/
     gpu/        context.ts (adapter/device/limits/features, device-loss, allocation accounting), targets.ts, mipmaps.ts, timestamps.ts
     scene/      gltf.ts (loader), graph.ts, camera.ts (free-fly), camera_path.ts, lights.ts, rng.ts
     render/     passes/ (clustering, gbuffer, lighting, shadows, ssao, bloom, tonemap, present)
-                techniques/ (naive, forward_plus, clustered_deferred), shaders/ (*.wgsl + preprocessor)
+                techniques/ (clustered_deferred), shaders/ (*.wgsl + preprocessor)
     bench/      driver.ts (throughput + display loops), timeline.ts, protocol.ts, stats.ts,
                 score.ts, environment.ts (device info + flags), probes.ts (frame hashes),
                 telemetry.ts (browser-API collectors), microbench.ts (clock/bandwidth/CPU probes)
@@ -620,7 +620,7 @@ The measurement core (§3), results and history, and submission are **not** on t
 - **Stress test:** 20 loops of GT1, frame-rate stability %, pass/fail at 97%. The thermal timeline chart comes from Compute Pressure plus a clock probe between loops, with imported sensor logs overlaid when present.
 - **Sensor-log import** ([§10.3](#103-opt-in-ground-truth)): parsers for nvidia-smi, HWiNFO, Afterburner, and powermetrics, aligned to the run timeline and charted on the results page.
 - **Native sensor helper:** evaluate only if log import proves popular. It stays strictly optional.
-- **Feature tests:** draw-call throughput (API overhead equivalent), compute bandwidth, and a lighting-technique comparison built on the naive/Forward+/deferred modes.
+- **Feature tests:** draw-call throughput (API overhead equivalent), compute bandwidth, and a lighting-technique comparison. That one would bring the naive and Forward+ renderers back from git history.
 - **CPU test:** WASM physics across Web Workers, with a combined score like 3DMark's overall score.
 - **New suites:** an outdoor scene, a compute path-tracing test (BVH in compute; the "Port Royal" of the web), and a mobile-first suite.
 - **Accounts and sync** for cross-device history. Hall of Fame. Per-GPU detail pages.

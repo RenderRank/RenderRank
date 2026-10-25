@@ -4,11 +4,7 @@ import { Camera } from '../stage/camera';
 
 import commonRaw from './common.wgsl?raw';
 
-import naiveVertRaw from './naive.vs.wgsl?raw';
-import naiveFragRaw from './naive.fs.wgsl?raw';
-
-import forwardPlusFragRaw from './forward_plus.fs.wgsl?raw';
-
+import clusteredDeferredVertRaw from './clustered_deferred.vs.wgsl?raw';
 import clusteredDeferredFragRaw from './clustered_deferred.fs.wgsl?raw';
 import clusteredDeferredFullscreenVertRaw from './clustered_deferred_fullscreen.vs.wgsl?raw';
 import clusteredDeferredFullscreenFragRaw from './clustered_deferred_fullscreen.fs.wgsl?raw';
@@ -54,11 +50,7 @@ function processShaderRaw(raw: string) {
     return commonSrc + evalShaderRaw(raw);
 }
 
-export const naiveVertSrc: string = processShaderRaw(naiveVertRaw);
-export const naiveFragSrc: string = processShaderRaw(naiveFragRaw);
-
-export const forwardPlusFragSrc: string = processShaderRaw(forwardPlusFragRaw);
-
+export const clusteredDeferredVertSrc: string = processShaderRaw(clusteredDeferredVertRaw);
 export const clusteredDeferredFragSrc: string = processShaderRaw(clusteredDeferredFragRaw);
 export const clusteredDeferredFullscreenVertSrc: string = processShaderRaw(clusteredDeferredFullscreenVertRaw);
 export const clusteredDeferredFullscreenFragSrc: string = processShaderRaw(clusteredDeferredFullscreenFragRaw);

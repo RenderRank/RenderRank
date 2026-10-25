@@ -1,10 +1,7 @@
 import Stats from 'stats.js';
 import { GUI } from 'dat.gui';
 
-import { Renderer } from './renderer';
 import { GpuContext } from './gpu/context';
-import { NaiveRenderer } from './renderers/naive';
-import { ForwardPlusRenderer } from './renderers/forward_plus';
 import { ClusteredDeferredRenderer } from './renderers/clustered_deferred';
 
 import { setupLoaders, Scene } from './stage/scene';
@@ -46,43 +43,16 @@ gui.add(lights, 'numLights').min(1).max(Lights.maxNumLights).step(1).onChange(()
 
 const stage = new Stage(gpu, scene, lights, camera, stats);
 
-var renderer: Renderer | undefined;
-
-function setRenderer(mode: string): Renderer | undefined {
-    renderer?.stop();
-
-    switch (mode) {
-        case renderModes.naive:
-            renderer = new NaiveRenderer(stage);
-            break;
-        case renderModes.forwardPlus:
-            renderer = new ForwardPlusRenderer(stage);
-            break;
-        case renderModes.clusteredDeferred:
-            renderer = new ClusteredDeferredRenderer(stage);
-            break;
-    }
-
-    return renderer;
-}
-
-const renderModes = { naive: 'naive', forwardPlus: 'forward+', clusteredDeferred: 'clustered deferred' };
-let renderModeController = gui.add({ mode: renderModes.clusteredDeferred }, 'mode', renderModes);
-renderModeController.onChange(setRenderer);
-
-setRenderer(renderModeController.getValue());
+const renderer = new ClusteredDeferredRenderer(stage);
 
 // Every GPU resource dies with the device, so stop drawing and tell the user instead of showing a frozen frame
 gpu.lost.then((info) => {
-    renderer?.stop();
+    renderer.stop();
     showFatalError(`The GPU device was lost (${info.message || info.reason}). Reload the page to try again.`);
 });
 
 // Setup benchmark runner
-const benchmarkRunner = new BenchmarkRunner(
-    stage,
-    setRenderer
-);
+const benchmarkRunner = new BenchmarkRunner(stage);
 
 // Add progress display element
 const progressDiv = document.createElement('div');
@@ -118,8 +88,6 @@ benchmarkRunner.setCompleteCallback((results) => {
         setTimeout(() => {
             progressDiv.style.display = 'none';
             progressDiv.innerHTML = '';
-            // Restore the original renderer
-            setRenderer(renderModeController.getValue());
         }, 2000);
     }, 1000);
 });
@@ -131,7 +99,7 @@ const benchmarkControls = {
             alert('Benchmark is already running!');
             return;
         }
-        if (confirm('This will run automated performance tests for all rendering modes with different light counts. This may take several minutes. Continue?')) {
+        if (confirm('This will run automated performance tests with different light counts. This may take several minutes. Continue?')) {
             progressDiv.innerHTML = '<strong>Starting benchmark...</strong><br>';
             progressDiv.style.display = 'block';
             // Start benchmark after a short delay to let UI update
