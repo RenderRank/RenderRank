@@ -5,8 +5,8 @@ import { GpuContext } from "../gpu/context";
 
 class CameraUniforms {
     // viewProjMat (16) + invProjMat (16) + viewMat (16) + screenWidth (1) + screenHeight (1) + nearPlane (1) + farPlane (1)
-    // + cameraPos (3, padded to 4 since vec3f aligns to 16 bytes) = 56 floats
-    readonly buffer = new ArrayBuffer(56 * 4);
+    // + cameraPos (3, padded to 4 since vec3f aligns to 16 bytes) + invViewProjMat (16) = 72 floats
+    readonly buffer = new ArrayBuffer(72 * 4);
     private readonly floatView = new Float32Array(this.buffer);
 
     set viewProjMat(mat: Float32Array) {
@@ -46,6 +46,12 @@ class CameraUniforms {
     set cameraPos(pos: Float32Array) {
         for (let i = 0; i < 3; i++) {
             this.floatView[52 + i] = pos[i];
+        }
+    }
+
+    set invViewProjMat(mat: Float32Array) {
+        for (let i = 0; i < 16; i++) {
+            this.floatView[56 + i] = mat[i];
         }
     }
 }
@@ -191,6 +197,7 @@ export class Camera {
         this.uniforms.nearPlane = Camera.nearPlane;
         this.uniforms.farPlane = Camera.farPlane;
         this.uniforms.cameraPos = this.cameraPos;
+        this.uniforms.invViewProjMat = mat4.invert(viewProjMat); // for rebuilding world positions from depth
 
         this.gpu.device.queue.writeBuffer(this.uniformsBuffer, 0, this.uniforms.buffer);
     }

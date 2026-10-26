@@ -37,10 +37,42 @@ struct CameraUniforms {
     screenHeight: f32,
     nearPlane: f32,
     farPlane: f32,
-    cameraPos: vec3f // world space
+    cameraPos: vec3f, // world space
+    invViewProjMat: mat4x4f
 }
 
 const PI = 3.14159265359;
+
+// World position of a pixel from its depth-buffer value (WebGPU NDC: x, y in [-1, 1] with y up; depth in [0, 1])
+fn reconstructWorldPos(fragCoord: vec2f, depth: f32, screenSize: vec2f, invViewProj: mat4x4f) -> vec3f {
+    let uv = fragCoord / screenSize;
+    let ndc = vec4f(uv.x * 2.f - 1.f, 1.f - uv.y * 2.f, depth, 1.f);
+    let world = invViewProj * ndc;
+    return world.xyz / world.w;
+}
+
+// Octahedral normal encoding (Cigolle et al. 2014): folds the unit sphere onto a square, so a normal fits in two
+// unorm channels with nearly uniform precision in every direction
+fn octWrap(v: vec2f) -> vec2f {
+    return (1.f - abs(v.yx)) * select(vec2f(-1.f), vec2f(1.f), v >= vec2f(0.f));
+}
+
+fn encodeOctahedral(n: vec3f) -> vec2f {
+    var p = n.xy / (abs(n.x) + abs(n.y) + abs(n.z));
+    if (n.z < 0.f) {
+        p = octWrap(p);
+    }
+    return p * 0.5f + 0.5f;
+}
+
+fn decodeOctahedral(encoded: vec2f) -> vec3f {
+    let f = encoded * 2.f - 1.f;
+    var n = vec3f(f, 1.f - abs(f.x) - abs(f.y));
+    let t = clamp(-n.z, 0.f, 1.f);
+    n.x += select(t, -t, n.x >= 0.f);
+    n.y += select(t, -t, n.y >= 0.f);
+    return normalize(n);
+}
 
 // CHECKITOUT: this special attenuation function ensures lights don't affect geometry outside the maximum light radius
 fn rangeAttenuation(distance: f32) -> f32 {

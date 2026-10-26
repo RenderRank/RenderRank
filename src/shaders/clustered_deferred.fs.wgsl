@@ -1,6 +1,6 @@
 // Clustered Deferred G-buffer fragment shader
-// This shader stores geometry and material information (position, normal-mapped normal, base color, roughness,
-// metallic) into G-buffers. No lighting calculations are performed here.
+// This shader stores material information (base color, metallic, normal-mapped normal, roughness) into two packed
+// G-buffers. Position comes from the depth buffer instead. No lighting calculations are performed here.
 
 // Matches the material uniform buffer written in scene.ts
 struct MaterialUniforms {
@@ -21,19 +21,16 @@ struct MaterialUniforms {
 
 struct FragmentInput
 {
-    @builtin(position) fragCoord: vec4f,
     @builtin(front_facing) frontFacing: bool,
-    @location(0) pos: vec3f,
-    @location(1) nor: vec3f,
-    @location(2) uv: vec2f,
-    @location(3) tangent: vec4f
+    @location(0) nor: vec3f,
+    @location(1) uv: vec2f,
+    @location(2) tangent: vec4f
 }
 
 struct GBufferOutput
 {
-    @location(0) position: vec4f,
-    @location(1) normal: vec4f, // xyz normal, w roughness
-    @location(2) albedo: vec4f  // rgb base color, a metallic
+    @location(0) albedoMetallic: vec4f,  // rgba8unorm-srgb: rgb base color, a metallic (alpha is stored linear)
+    @location(1) normalRoughness: vec4f  // rgb10a2unorm: rg octahedral normal, b roughness, a unused
 }
 
 @fragment
@@ -69,11 +66,9 @@ fn main(in: FragmentInput) -> GBufferOutput
 
     var output: GBufferOutput;
 
-    output.position = vec4f(in.pos, in.fragCoord.z);
+    output.albedoMetallic = vec4f(baseColor.rgb, metallic);
 
-    output.normal = vec4f(normal, roughness);
-
-    output.albedo = vec4f(baseColor.rgb, metallic);
+    output.normalRoughness = vec4f(encodeOctahedral(normal), roughness, 0.0);
 
     return output;
 }

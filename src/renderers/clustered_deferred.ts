@@ -4,15 +4,12 @@ import { Stage } from '../stage/stage';
 import { TonemapPass } from '../passes/tonemap';
 
 export class ClusteredDeferredRenderer extends renderer.Renderer {
-    // G-buffer textures
-    gBufferPositionTexture: GPUTexture;
-    gBufferPositionTextureView: GPUTextureView;
+    // G-buffer textures: 8 bytes per pixel plus depth. World position isn't stored; it's rebuilt from depth.
+    gBufferAlbedoMetallicTexture: GPUTexture;
+    gBufferAlbedoMetallicTextureView: GPUTextureView;
 
-    gBufferNormalTexture: GPUTexture;
-    gBufferNormalTextureView: GPUTextureView;
-
-    gBufferAlbedoTexture: GPUTexture;
-    gBufferAlbedoTextureView: GPUTextureView;
+    gBufferNormalRoughnessTexture: GPUTexture;
+    gBufferNormalRoughnessTextureView: GPUTextureView;
 
     depthTexture: GPUTexture;
     depthTextureView: GPUTextureView;
@@ -33,39 +30,37 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
     gBufferPipeline: GPURenderPipeline;
     fullscreenPipeline: GPURenderPipeline;
 
-    gBufferSampler: GPUSampler;
-
     constructor(stage: Stage) {
         super(stage);
 
         const size = [this.resolution.width, this.resolution.height];
 
-        this.gBufferPositionTexture = this.gpu.device.createTexture({
-            size: size,
-            format: "rgba16float",
-            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
-        });
-        this.gBufferPositionTextureView = this.gBufferPositionTexture.createView();
-
-        this.gBufferNormalTexture = this.gpu.device.createTexture({
-            size: size,
-            format: "rgba16float",
-            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
-        });
-        this.gBufferNormalTextureView = this.gBufferNormalTexture.createView();
-
-        // -srgb so linear albedo keeps its precision in dark tones; it's encoded on write and decoded on read
-        this.gBufferAlbedoTexture = this.gpu.device.createTexture({
+        // Base color + metallic. -srgb so linear albedo keeps its precision in dark tones; it's encoded on write and
+        // decoded on read. Alpha (metallic) is always stored linear.
+        this.gBufferAlbedoMetallicTexture = this.gpu.device.createTexture({
+            label: "G-buffer albedo + metallic",
             size: size,
             format: "rgba8unorm-srgb",
             usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
         });
-        this.gBufferAlbedoTextureView = this.gBufferAlbedoTexture.createView();
+        this.gBufferAlbedoMetallicTextureView = this.gBufferAlbedoMetallicTexture.createView();
 
-        this.depthTexture = this.gpu.device.createTexture({
+        // Octahedral normal at 10 bits per axis + 10-bit roughness
+        this.gBufferNormalRoughnessTexture = this.gpu.device.createTexture({
+            label: "G-buffer normal + roughness",
             size: size,
-            format: "depth24plus",
-            usage: GPUTextureUsage.RENDER_ATTACHMENT
+            format: "rgb10a2unorm",
+            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
+        });
+        this.gBufferNormalRoughnessTextureView = this.gBufferNormalRoughnessTexture.createView();
+
+        // Sampled by the lighting pass to rebuild positions. depth32float rather than depth24plus because the latter
+        // maps to different physical formats per backend, and the benchmark's bandwidth shouldn't vary that way.
+        this.depthTexture = this.gpu.device.createTexture({
+            label: "depth",
+            size: size,
+            format: "depth32float",
+            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
         });
         this.depthTextureView = this.depthTexture.createView();
 
@@ -79,11 +74,6 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
 
         this.tonemapPass = new TonemapPass(this.gpu, this.hdrTexture);
         this.outputTexture = this.tonemapPass.outputTexture;
-
-        this.gBufferSampler = this.gpu.device.createSampler({
-            magFilter: "nearest",
-            minFilter: "nearest"
-        });
 
         this.gBufferBindGroupLayout = this.gpu.device.createBindGroupLayout({
             label: "clustered deferred G-buffer bind group layout",
@@ -130,25 +120,20 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                     visibility: GPUShaderStage.FRAGMENT,
                     buffer: { type: "read-only-storage" }
                 },
-                { // G-buffer position texture
+                { // depth texture
                     binding: 4,
                     visibility: GPUShaderStage.FRAGMENT,
-                    texture: { sampleType: "unfilterable-float" }
+                    texture: { sampleType: "depth" }
                 },
-                { // G-buffer normal texture
+                { // G-buffer albedo + metallic texture
                     binding: 5,
                     visibility: GPUShaderStage.FRAGMENT,
                     texture: { sampleType: "unfilterable-float" }
                 },
-                { // G-buffer albedo texture
+                { // G-buffer normal + roughness texture
                     binding: 6,
                     visibility: GPUShaderStage.FRAGMENT,
-                    texture: {}
-                },
-                { // G-buffer sampler
-                    binding: 7,
-                    visibility: GPUShaderStage.FRAGMENT,
-                    sampler: { type: "non-filtering" }
+                    texture: { sampleType: "unfilterable-float" }
                 }
             ]
         });
@@ -175,19 +160,15 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                 },
                 {
                     binding: 4,
-                    resource: this.gBufferPositionTextureView
+                    resource: this.depthTextureView
                 },
                 {
                     binding: 5,
-                    resource: this.gBufferNormalTextureView
+                    resource: this.gBufferAlbedoMetallicTextureView
                 },
                 {
                     binding: 6,
-                    resource: this.gBufferAlbedoTextureView
-                },
-                {
-                    binding: 7,
-                    resource: this.gBufferSampler
+                    resource: this.gBufferNormalRoughnessTextureView
                 }
             ]
         });
@@ -205,7 +186,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
             depthStencil: {
                 depthWriteEnabled: true,
                 depthCompare: "less",
-                format: "depth24plus"
+                format: "depth32float"
             },
             vertex: {
                 module: this.gpu.device.createShaderModule({
@@ -221,13 +202,10 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                 }),
                 targets: [
                     {
-                        format: "rgba16float" // position and depth
+                        format: "rgba8unorm-srgb" // albedo + metallic
                     },
                     {
-                        format: "rgba16float" // normal
-                    },
-                    {
-                        format: "rgba8unorm-srgb" // albedo
+                        format: "rgb10a2unorm" // octahedral normal + roughness
                     }
                 ]
             }
@@ -270,19 +248,13 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
             label: "clustered deferred G-buffer pass",
             colorAttachments: [
                 {
-                    view: this.gBufferPositionTextureView,
+                    view: this.gBufferAlbedoMetallicTextureView,
                     clearValue: [0, 0, 0, 0],
                     loadOp: "clear",
                     storeOp: "store"
                 },
                 {
-                    view: this.gBufferNormalTextureView,
-                    clearValue: [0, 0, 0, 0],
-                    loadOp: "clear",
-                    storeOp: "store"
-                },
-                {
-                    view: this.gBufferAlbedoTextureView,
+                    view: this.gBufferNormalRoughnessTextureView,
                     clearValue: [0, 0, 0, 0],
                     loadOp: "clear",
                     storeOp: "store"

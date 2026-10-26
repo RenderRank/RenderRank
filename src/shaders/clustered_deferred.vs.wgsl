@@ -1,5 +1,6 @@
 // Clustered Deferred G-buffer vertex shader
-// Transforms scene geometry and passes world-space position, normal, tangent, and UV to the G-buffer fragment shader
+// Transforms scene geometry and passes world-space normal, tangent, and UV to the G-buffer fragment shader. World
+// position isn't passed: the lighting pass rebuilds it from the depth buffer.
 
 // TODO-1.3: add a uniform variable here for camera uniforms (of type CameraUniforms)
 // make sure to use ${bindGroup_scene} for the group
@@ -18,10 +19,9 @@ struct VertexInput
 struct VertexOutput
 {
     @builtin(position) fragPos: vec4f,
-    @location(0) pos: vec3f,
-    @location(1) nor: vec3f,
-    @location(2) uv: vec2f,
-    @location(3) tangent: vec4f
+    @location(0) nor: vec3f,
+    @location(1) uv: vec2f,
+    @location(2) tangent: vec4f
 }
 
 @vertex
@@ -35,7 +35,6 @@ fn main(in: VertexInput) -> VertexOutput
 
     var out: VertexOutput;
     out.fragPos = cameraUniforms.viewProjMat * modelPos; // TODO-1.3: replace ??? with the view proj mat from your CameraUniforms uniform variable
-    out.pos = modelPos.xyz / modelPos.w;
     out.nor = modelDirMat * in.nor;
     out.uv = in.uv;
     out.tangent = vec4f(modelDirMat * in.tangent.xyz, in.tangent.w);
