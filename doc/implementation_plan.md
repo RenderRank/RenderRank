@@ -52,7 +52,7 @@ The late-October alpha milestone in the README isn't reachable from the current 
 What we can build on:
 
 - A clustered deferred renderer ([src/renderers/](../src/renderers/)). The original naive and Forward+ renderers were removed because no test uses them; git history has them.
-- A GPU light-clustering compute pass ([clustering.cs.wgsl](../src/shaders/clustering.cs.wgsl)) and GPU light animation ([move_lights.cs.wgsl](../src/shaders/move_lights.cs.wgsl)).
+- GPU light clustering ([cluster_bounds.cs.wgsl](../src/shaders/cluster_bounds.cs.wgsl), [light_culling.cs.wgsl](../src/shaders/light_culling.cs.wgsl), [light_assignment.cs.wgsl](../src/shaders/light_assignment.cs.wgsl)) and GPU light animation ([move_lights.cs.wgsl](../src/shaders/move_lights.cs.wgsl)).
 - A glTF loader and scene graph ([scene.ts](../src/stage/scene.ts)), Sponza (262k triangles, 103 primitives, 25 materials, 69 textures, 51 MB on disk).
 - A light-count sweep benchmark with CSV export ([benchmark.ts](../src/testing/benchmark.ts)).
 - Vite build plus a GitHub Pages workflow.
@@ -67,7 +67,7 @@ The gaps that matter for a benchmark:
 | **Protocol** | 30 warm-up frames, 120 sample frames, one pass, min/avg/max only ([benchmark.ts:86-92](../src/testing/benchmark.ts#L86-L92)). Pipelines compile synchronously when the renderer is constructed. | Too short to be stable. No percentiles or variance. Shader-compile hitches land in the measured window. |
 | **Architecture** | Fixed in §6.1–6.2. `GpuContext` replaced the module-level globals. Renderers only encode frames, and a `DisplayDriver` ([display_driver.ts](../src/drivers/display_driver.ts)) owns the rAF loop. | The uncapped throughput driver (§3.1) still needs building on top. |
 | **Materials** | Fixed in §6.3–6.4. Textures are sRGB-correct and mipmapped. Lighting is HDR with an ACES tonemap and metallic-roughness PBR. Normal maps, glTF factors, and alpha modes are used. | There's no ambient or environment light yet, so unlit metal reads as black. |
-| **Clustering cost** | Each thread loops over all lights and keeps a private `array<u32, 1500>`, which is 6 KB per invocation ([clustering.cs.wgsl:97-100](../src/shaders/clustering.cs.wgsl#L97-L100)). The global index list reserves 3,456 × 1,500 slots (≈21 MB). Light radius and cluster dimensions are compile-time constants ([shaders.ts:33-39](../src/shaders/shaders.ts#L33-L39)). | It may fail or crawl on mobile and integrated GPUs, and light radius can't be changed per preset. The fix must land **before** the workload freeze. |
+| **Clustering cost** | Fixed in §6.6. Clustering now runs as frustum culling, then shared-memory batched assignment into a compact 8 MB index list. It has no large private arrays. Light radius and cluster dimensions are still compile-time constants ([shaders.ts](../src/shaders/shaders.ts)). | Light radius can't change per preset yet (week 2). |
 | **Clustered deferred G-buffer** | Fixed in §6.5. Position is rebuilt from `depth32float`. The G-buffer is two packed 4-byte targets ([clustered_deferred.ts](../src/renderers/clustered_deferred.ts)). | — |
 | **Product** | dat.gui + stats.js, alert/confirm dialogs, CSV auto-download. | No run flow, results page, history, or leaderboard. |
 | **Build hygiene** | `tsc --noEmit` reports 5 errors: two typed-array errors in scene.ts (`writeBuffer` with `ArrayBufferLike` views) and unused variables in main.ts, shaders.ts, and benchmark.ts. The build doesn't type-check. Scenes are copied with `cp -r` ([package.json:8](../package.json#L8)). | Fix in week 1 and gate CI on it. |
@@ -140,7 +140,7 @@ If CV across the two repeats is above 3%, the run gets a `high-variance` flag an
 
 ### 3.5 Environment guards (automatic flags)
 
-`tab-hidden` (Page Visibility API), `focus-lost`, `resized` (harmless, since resolution is fixed, but logged), `device-lost` (abort), `fallback-adapter`, `on-battery` (Battery API where available, warning only), `custom-settings`, `display-limited`, `high-variance`, `not-isolated` (not cross-origin isolated). Any flag except `resized` and `on-battery` makes a run ineligible for the ranked leaderboard, but it can still be saved locally.
+`tab-hidden` (Page Visibility API), `focus-lost`, `resized` (harmless, since resolution is fixed, but logged), `device-lost` (abort), `fallback-adapter`, `on-battery` (Battery API where available, warning only), `custom-settings`, `display-limited`, `high-variance`, `not-isolated` (not cross-origin isolated), `light-overflow` (the clustered light index list filled up and dropped lights; read with `Lights.readClusteringStats()`). Any flag except `resized` and `on-battery` makes a run ineligible for the ranked leaderboard, but it can still be saved locally.
 
 **Warnings** from telemetry ([§10](#10-system-telemetry-beyond-webgpu)) are shown on the result and can be filtered on the leaderboard, but they don't block ranking:
 
@@ -283,12 +283,14 @@ Ordered so everything that changes the workload lands before the freeze.
    - **Layout:** `rgba8unorm-srgb` holds base color + metallic. `rgb10a2unorm` holds a 10:10 octahedral normal + 10-bit roughness. `depth32float` is now sampled (it was `depth24plus`, whose physical format varies by backend).
    - **Size:** 8 bytes per pixel written instead of 20; 17 MB instead of 41 MB at 1080p.
    - **Check:** a frozen-time A/B render against the old layout differs by a mean of 0.1/255. The only outliers are on surfaces almost touching a light, where the old `rgba16float` positions (≈0.008-unit steps) were the less accurate ones.
-6. **Clustering rewrite.**
-   - Compute cluster AABBs only when the projection or resolution changes.
-   - Cull lights to the view frustum first.
-   - Load lights in workgroup-shared batches.
-   - Build a compact index list with an atomic counter instead of 1,500 fixed slots per cluster, and set an overflow flag.
-   - Must pass on default limits (Light tier).
+6. **Clustering rewrite.** **Done:** three dispatches in one compute pass, set up in [lights.ts](../src/stage/lights.ts).
+   - Compute cluster AABBs only when the projection or resolution changes. *Done: [cluster_bounds.cs.wgsl](../src/shaders/cluster_bounds.cs.wgsl) runs on the first frame only.*
+   - Cull lights to the view frustum first. *Done: [light_culling.cs.wgsl](../src/shaders/light_culling.cs.wgsl) uses world-space planes from the view-projection matrix and compacts survivors, in view space, with an atomic counter. 368 of 500 lights survive on the opening view.*
+   - Load lights in workgroup-shared batches. *Done: [light_assignment.cs.wgsl](../src/shaders/light_assignment.cs.wgsl) uses 64 clusters per workgroup and streams lights in 64-light batches.*
+   - Build a compact index list with an atomic counter instead of 1,500 fixed slots per cluster, and set an overflow flag. *Done: each cluster counts, reserves one contiguous run with a single `atomicAdd`, then writes into it. The list holds 2²¹ indices (8 MB, down from ≈21 MB). The opening view needs ~48k at 500 lights and ~560k at 5000. Overflow sets a flag (`light-overflow`, §3.5) instead of corrupting memory.*
+   - Must pass on default limits (Light tier). *Done: 1 KB of workgroup memory, at most 128 invocations per workgroup, 6 storage buffers per stage.*
+   - **Check:** frozen-time A/B against the old clustering was bit-identical at 500 lights and within 1/255 at 5000. A forced overflow raised the flag with no errors.
+   - The order of lights within a cluster now depends on atomics, so float summation order can vary frame to frame by about 1 LSB. Probe-hash tolerance (item 10) has to allow for that.
 7. **Shadows.** Cascaded shadow map for the sun (GT1).
 8. **GT2 pipeline** (with Stan). VAT instanced characters, compute culling and LOD into an indirect buffer, SSAO, bloom.
 9. **Diagnostics.** Per-pass timestamp queries resolved into a ring of readback buffers, so we never stall the GPU.

@@ -16,11 +16,17 @@ struct AABB {
     maxPos: vec3f
 }
 
-struct Cluster {
-    minBounds: vec3f,
-    maxBounds: vec3f,
-    lightCount: u32,
-    lightIndices: array<u32, ${maxLightsPerCluster}>
+// A light that survived frustum culling, with its position already in view space
+struct VisibleLight {
+    viewPos: vec3f,
+    lightIdx: u32 // index into lightSet.lights
+}
+
+// Reset to zero at the start of every frame's clustering
+struct ClusteringCounters {
+    visibleLightCount: atomic<u32>,
+    lightIndexCount: atomic<u32>, // indices requested, which can exceed the list's capacity
+    overflow: atomic<u32>         // 1 if any cluster dropped lights because the list was full
 }
 
 // Light grid entry for each cluster

@@ -14,7 +14,9 @@ import clusteredDeferredFullscreenFragRaw from './clustered_deferred_fullscreen.
 import tonemapFragRaw from './tonemap.fs.wgsl?raw';
 
 import moveLightsComputeRaw from './move_lights.cs.wgsl?raw';
-import clusteringComputeRaw from './clustering.cs.wgsl?raw';
+import clusterBoundsComputeRaw from './cluster_bounds.cs.wgsl?raw';
+import lightCullingComputeRaw from './light_culling.cs.wgsl?raw';
+import lightAssignmentComputeRaw from './light_assignment.cs.wgsl?raw';
 
 // CONSTANTS (for use in shaders)
 // =================================
@@ -36,8 +38,11 @@ export const constants = {
     clusterWidth: 16,
     clusterHeight: 9,
     clusterDepth: 24,
-    maxLightsPerCluster: 1500,
-    clusteringWorkgroupSize: 6,
+    clusteringWorkgroupSize: 64, // 1D, one cluster per invocation; also the light batch size in shared memory
+    lightCullingWorkgroupSize: 128,
+    // Capacity of the light index list shared by all clusters (8 MB). Past it, lights get dropped and an overflow flag
+    // is set. Sponza's opening view needs ~48k at 500 lights and ~560k at 5000.
+    maxClusterLightIndices: 1 << 21,
 
     // Scales HDR lighting before the tone curve. Tuned by eye for Sponza at the current light intensity.
     toneMappingExposure: 1.7
@@ -67,4 +72,6 @@ export const clusteredDeferredFullscreenFragSrc: string = processShaderRaw(clust
 export const tonemapFragSrc: string = processShaderRaw(tonemapFragRaw);
 
 export const moveLightsComputeSrc: string = processShaderRaw(moveLightsComputeRaw);
-export const clusteringComputeSrc: string = processShaderRaw(clusteringComputeRaw);
+export const clusterBoundsComputeSrc: string = processShaderRaw(clusterBoundsComputeRaw);
+export const lightCullingComputeSrc: string = processShaderRaw(lightCullingComputeRaw);
+export const lightAssignmentComputeSrc: string = processShaderRaw(lightAssignmentComputeRaw);

@@ -1,33 +1,23 @@
+// Cluster bounds compute shader
+// Computes each cluster's view-space AABB. Bounds depend only on the projection and the render resolution, so this
+// runs once instead of every frame.
+
 @group(0) @binding(0) var<uniform> cameraUniforms: CameraUniforms;
-@group(0) @binding(1) var<storage, read> lightSet: LightSet;
 @group(0) @binding(2) var<storage, read_write> clusterAABBs: array<AABB>;
-@group(0) @binding(3) var<storage, read_write> lightGrid: array<LightGridEntry>;
-@group(0) @binding(4) var<storage, read_write> globalLightIndexList: array<u32>;
 
 const totalClusters = ${clusterWidth} * ${clusterHeight} * ${clusterDepth};
 
-fn sphereAABBIntersection(sphereCenter: vec3f, sphereRadius: f32, aabbMin: vec3f, aabbMax: vec3f) -> bool {
-    let closestPoint = clamp(sphereCenter, aabbMin, aabbMax);
-
-    let distance = length(sphereCenter - closestPoint);
-
-    return distance <= sphereRadius;
-}
-
 @compute
-@workgroup_size(${clusteringWorkgroupSize}, ${clusteringWorkgroupSize}, ${clusteringWorkgroupSize})
+@workgroup_size(${clusteringWorkgroupSize})
 fn main(@builtin(global_invocation_id) globalId: vec3u) {
-    let clusterX = globalId.x;
-    let clusterY = globalId.y;
-    let clusterZ = globalId.z;
-
-    if (clusterX >= ${clusterWidth} || clusterY >= ${clusterHeight} || clusterZ >= ${clusterDepth}) {
+    let clusterIdx = globalId.x;
+    if (clusterIdx >= totalClusters) {
         return;
     }
 
-    let clusterIdx = clusterX +
-                     clusterY * ${clusterWidth} +
-                     clusterZ * ${clusterWidth} * ${clusterHeight};
+    let clusterX = clusterIdx % ${clusterWidth};
+    let clusterY = (clusterIdx / ${clusterWidth}) % ${clusterHeight};
+    let clusterZ = clusterIdx / (${clusterWidth} * ${clusterHeight});
 
     let screenWidth = cameraUniforms.screenWidth;
     let screenHeight = cameraUniforms.screenHeight;
@@ -47,8 +37,8 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
     let farDepth = depthBounds.y;
 
     // Convert screen corners to NDC [-1, 1]
-    let minScreenNDC_y = 1.0 - (maxScreen.y / screenHeight) * 2.0;  
-    let maxScreenNDC_y = 1.0 - (minScreen.y / screenHeight) * 2.0; 
+    let minScreenNDC_y = 1.0 - (maxScreen.y / screenHeight) * 2.0;
+    let maxScreenNDC_y = 1.0 - (minScreen.y / screenHeight) * 2.0;
 
     let minScreenNDC = vec2f(
         (minScreen.x / screenWidth) * 2.0 - 1.0,
@@ -73,8 +63,6 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
                 let y = select(minScreenNDC.y, maxScreenNDC.y, j == 1u);
                 let depth = select(nearDepth, farDepth, k == 1u);
 
-                let viewZ = -depth; // View space Z is negative
-
                 // Unproject screen point at this depth
                 let ndc = vec4f(x, y, 0.0, 1.0);
                 var viewPos = invProj * ndc;
@@ -92,35 +80,4 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
 
     clusterAABBs[clusterIdx].minPos = minView;
     clusterAABBs[clusterIdx].maxPos = maxView;
-
-    var lightCount = 0u;
-    var lightIndices: array<u32, ${maxLightsPerCluster}>;
-
-    let numLights = lightSet.numLights;
-    for (var lightIdx = 0u; lightIdx < numLights; lightIdx++) {
-        let light = lightSet.lights[lightIdx];
-
-        // Transform light position from world space to view space
-        let lightPosView = (cameraUniforms.viewMat * vec4f(light.pos, 1.0)).xyz;
-
-        // Check if light sphere intersects with cluster AABB
-        let lightRadius = ${lightRadius};
-        if (sphereAABBIntersection(lightPosView, f32(lightRadius), minView, maxView)) {
-            if (lightCount < ${maxLightsPerCluster}) {
-                lightIndices[lightCount] = lightIdx;
-                lightCount++;
-            }
-        }
-    }
-
-    // Calculate offset into global index list
-    // Each cluster gets a contiguous block
-    let offset = clusterIdx * ${maxLightsPerCluster};
-
-    for (var i = 0u; i < lightCount; i++) {
-        globalLightIndexList[offset + i] = lightIndices[i];
-    }
-
-    lightGrid[clusterIdx].offset = offset;
-    lightGrid[clusterIdx].count = lightCount;
 }
