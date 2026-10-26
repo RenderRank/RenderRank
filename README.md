@@ -87,7 +87,7 @@ Code reviews, device testing, integration, and presentation preparation are shar
 
 ## Current state of the code
 
-The codebase starts from a WebGPU renderer (TypeScript + Vite) that draws the Sponza atrium lit by many moving point lights. It uses **clustered deferred** shading: a compute pass bins lights into a 3D grid of view-frustum clusters, and a full-screen pass shades a G-buffer using only each cluster's lights. Materials use metallic-roughness PBR (GGX specular, Lambert diffuse) with normal maps. Frames render offscreen at a fixed 1920×1080 in HDR, go through an ACES tonemap, and are scaled to fit the window.
+The codebase starts from a WebGPU renderer (TypeScript + Vite) that draws the Sponza atrium lit by many moving point lights. It uses **clustered deferred** shading: a compute pass bins lights into a 3D grid of view-frustum clusters, and a full-screen pass shades a G-buffer using only each cluster's lights. Materials use metallic-roughness PBR (GGX specular, Lambert diffuse) with normal maps. Frames render offscreen in HDR at a fixed resolution picked in the GUI (1080p, 1440p, or 2160p), go through an ACES tonemap, and are scaled to fit the window.
 
 The original naive and Forward+ renderers were removed because no benchmark test uses them. They're still in git history.
 

@@ -84,4 +84,8 @@ export class TonemapPass {
         pass.draw(6);
         pass.end();
     }
+
+    destroy() {
+        this.outputTexture.destroy();
+    }
 }

@@ -2,6 +2,7 @@ import Stats from 'stats.js';
 import { GUI } from 'dat.gui';
 
 import { GpuContext } from './gpu/context';
+import { Resolution } from './renderer';
 import { ClusteredDeferredRenderer } from './renderers/clustered_deferred';
 import { DisplayDriver } from './drivers/display_driver';
 
@@ -30,10 +31,15 @@ setupLoaders();
 let scene = new Scene(gpu);
 await scene.loadGltf('./scenes/sponza/Sponza.gltf');
 
-// Frames always render at this size and get scaled to fit the canvas, so window size doesn't change the workload
-const renderResolution = { width: 1920, height: 1080 };
+// Frames render at the chosen size and get scaled to fit the canvas, so window size doesn't change the workload
+const renderResolutions: Record<string, Resolution> = {
+    '1080p': { width: 1920, height: 1080 },
+    '1440p': { width: 2560, height: 1440 },
+    '2160p': { width: 3840, height: 2160 }
+};
+const renderSettings = { resolution: '1080p' };
 
-const camera = new Camera(gpu, renderResolution);
+const camera = new Camera(gpu, renderResolutions[renderSettings.resolution]);
 const lights = new Lights(gpu, camera);
 
 const stats = new Stats();
@@ -45,11 +51,20 @@ gui.add(lights, 'numLights').min(1).max(Lights.maxNumLights).step(1).onChange(()
     lights.updateLightSetUniformNumLights();
 });
 
-const stage = new Stage(gpu, renderResolution, scene, lights, camera, stats);
+const stage = new Stage(gpu, renderResolutions[renderSettings.resolution], scene, lights, camera, stats);
 
-const renderer = new ClusteredDeferredRenderer(stage);
+let renderer = new ClusteredDeferredRenderer(stage);
 const driver = new DisplayDriver(stage, renderer);
 driver.start();
+
+// Render targets are sized at construction, so a new resolution means a new renderer
+gui.add(renderSettings, 'resolution', Object.keys(renderResolutions)).onChange((name: string) => {
+    stage.setResolution(renderResolutions[name]);
+    const previousRenderer = renderer;
+    renderer = new ClusteredDeferredRenderer(stage);
+    driver.setRenderer(renderer);
+    previousRenderer.destroy();
+});
 
 // Every GPU resource dies with the device, so stop drawing and tell the user instead of showing a frozen frame
 gpu.lost.then((info) => {

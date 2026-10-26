@@ -77,6 +77,9 @@ export class Camera {
     static readonly nearPlane = 0.1;
     static readonly farPlane = 1000;
 
+    // Bumped whenever the projection changes, so anything derived from it (cluster bounds) knows to rebuild
+    projectionVersion: number = 0;
+
     keys: { [key: string]: boolean } = {};
 
     // resolution is the render target size, not the canvas size
@@ -95,9 +98,7 @@ export class Camera {
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
         });
 
-        const aspectRatio = resolution.width / resolution.height;
-        this.projMat = mat4.perspective(toRadians(fovYDegrees), aspectRatio, Camera.nearPlane, Camera.farPlane);
-        this.invProjMat = mat4.invert(this.projMat);
+        this.updateProjection();
 
         this.rotateCamera(0, 0); // set initial camera vectors
 
@@ -108,6 +109,18 @@ export class Camera {
         gpu.canvas.addEventListener('mousedown', () => gpu.canvas.requestPointerLock());
         gpu.canvas.addEventListener('mouseup', () => document.exitPointerLock());
         gpu.canvas.addEventListener('mousemove', (event) => this.onMouseMove(event));
+    }
+
+    setResolution(resolution: Resolution) {
+        this.resolution = resolution;
+        this.updateProjection();
+    }
+
+    private updateProjection() {
+        const aspectRatio = this.resolution.width / this.resolution.height;
+        this.projMat = mat4.perspective(toRadians(fovYDegrees), aspectRatio, Camera.nearPlane, Camera.farPlane);
+        this.invProjMat = mat4.invert(this.projMat);
+        this.projectionVersion++;
     }
 
     private onKeyEvent(event: KeyboardEvent, down: boolean) {

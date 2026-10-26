@@ -20,4 +20,10 @@ export class Stage {
         this.camera = camera;
         this.stats = stats;
     }
+
+    // Renderers size their targets when they're constructed, so create a new one after calling this
+    setResolution(resolution: Resolution) {
+        this.resolution = resolution;
+        this.camera.setResolution(resolution);
+    }
 }

@@ -304,4 +304,12 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
 
         this.tonemapPass.encode(encoder);
     }
+
+    override destroy() {
+        this.gBufferAlbedoMetallicTexture.destroy();
+        this.gBufferNormalRoughnessTexture.destroy();
+        this.depthTexture.destroy();
+        this.hdrTexture.destroy();
+        this.tonemapPass.destroy();
+    }
 }

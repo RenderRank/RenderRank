@@ -51,9 +51,9 @@ export class Lights {
     lightCullingComputePipeline: GPUComputePipeline;
     lightAssignmentComputePipeline: GPUComputePipeline;
 
-    // The camera's projection and the render resolution are fixed once they exist, so bounds are computed on the first
-    // clustering pass only
-    private clusterBoundsDirty = true;
+    // Cluster bounds depend only on the camera's projection, so they're rebuilt only when its version changes
+    // (-1: never built)
+    private clusterBoundsProjectionVersion = -1;
 
     constructor(gpu: GpuContext, camera: Camera) {
         this.gpu = gpu;
@@ -293,10 +293,10 @@ export class Lights {
         // Each dispatch sees the previous one's storage writes, so the three steps can share one pass
         const clusterWorkgroups = Math.ceil(numClusters / shaders.constants.clusteringWorkgroupSize);
 
-        if (this.clusterBoundsDirty) {
+        if (this.clusterBoundsProjectionVersion != this.camera.projectionVersion) {
             computePass.setPipeline(this.clusterBoundsComputePipeline);
             computePass.dispatchWorkgroups(clusterWorkgroups);
-            this.clusterBoundsDirty = false;
+            this.clusterBoundsProjectionVersion = this.camera.projectionVersion;
         }
 
         computePass.setPipeline(this.lightCullingComputePipeline);

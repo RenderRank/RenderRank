@@ -59,4 +59,7 @@ export abstract class Renderer {
 
     // Records every pass of one frame into the encoder. The caller submits it.
     abstract encodeFrame(encoder: GPUCommandEncoder): void;
+
+    // Frees the renderer's GPU targets. It can't render afterwards; frames already submitted still finish.
+    abstract destroy(): void;
 }

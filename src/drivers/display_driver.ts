@@ -27,6 +27,12 @@ export class DisplayDriver {
         cancelAnimationFrame(this.frameRequestId);
     }
 
+    // Takes effect on the next frame
+    setRenderer(renderer: Renderer) {
+        this.renderer = renderer;
+        this.presentPass = new PresentPass(this.stage.gpu, renderer.outputTexture);
+    }
+
     // Called after every frame except the first, with the time since the previous frame in ms
     setFrameTimeCallback(callback: ((frameTime: number) => void) | null) {
         this.frameTimeCallback = callback;
