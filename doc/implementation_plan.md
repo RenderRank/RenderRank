@@ -2,9 +2,11 @@
 
 *Drafted 2026-10-25. Covers the work from now to the early-December semester deliverable, plus a roadmap for later.*
 
+*Status updated 2026-11-03: the simulation library, Sponza preview/settings, device details, cancellable light-count benchmark, results table, and CSV export are implemented. Scene registration is documented in [AGENTS.md](../AGENTS.md). Scoring, a deterministic throughput protocol, persistent history, and the leaderboard remain planned.*
+
 ## Summary
 
-RenderRank already has a working WebGPU clustered renderer drawing Sponza with up to 5,000 lights. The product we want is a **benchmark**: fixed tests, a fixed protocol, one score, and a place to compare results. The renderer gives us a good foundation, but the measurement layer, the product shell, and the backend all need to be built.
+RenderRank has a working WebGPU clustered renderer drawing Sponza with up to 5,000 lights and a simulation-selection frontend. The product we want is a **benchmark**: fixed tests, a fixed protocol, one score, and a place to compare results. The measurement layer and backend still need to be built.
 
 The plan has four pillars:
 
@@ -55,6 +57,7 @@ What we can build on:
 - GPU light clustering ([cluster_bounds.cs.wgsl](../src/shaders/cluster_bounds.cs.wgsl), [light_culling.cs.wgsl](../src/shaders/light_culling.cs.wgsl), [light_assignment.cs.wgsl](../src/shaders/light_assignment.cs.wgsl)) and GPU light animation ([move_lights.cs.wgsl](../src/shaders/move_lights.cs.wgsl)).
 - A glTF loader and scene graph ([scene.ts](../src/stage/scene.ts)), Sponza (262k triangles, 103 primitives, 25 materials, 69 textures, 51 MB on disk).
 - A light-count sweep benchmark with CSV export ([benchmark.ts](../src/testing/benchmark.ts)).
+- A responsive scene library, lazy-loaded viewer, browser-reported GPU/system details, cancellation, and results table ([main.ts](../src/main.ts), [simulation.ts](../src/simulation.ts), [device.ts](../src/device.ts)).
 - Vite build plus a GitHub Pages workflow.
 
 The gaps that matter for a benchmark:
@@ -69,8 +72,8 @@ The gaps that matter for a benchmark:
 | **Materials** | Fixed in §6.3–6.4. Textures are sRGB-correct and mipmapped. Lighting is HDR with an ACES tonemap and metallic-roughness PBR. Normal maps, glTF factors, and alpha modes are used. | There's no ambient or environment light yet, so unlit metal reads as black. |
 | **Clustering cost** | Fixed in §6.6. Clustering now runs as frustum culling, then shared-memory batched assignment into a compact 8 MB index list. It has no large private arrays. Light radius and cluster dimensions are still compile-time constants ([shaders.ts](../src/shaders/shaders.ts)). | Light radius can't change per preset yet (week 2). |
 | **Clustered deferred G-buffer** | Fixed in §6.5. Position is rebuilt from `depth32float`. The G-buffer is two packed 4-byte targets ([clustered_deferred.ts](../src/renderers/clustered_deferred.ts)). | — |
-| **Product** | dat.gui + stats.js, alert/confirm dialogs, CSV auto-download. | No run flow, results page, history, or leaderboard. |
-| **Build hygiene** | `tsc --noEmit` reports 5 errors: two typed-array errors in scene.ts (`writeBuffer` with `ArrayBufferLike` views) and unused variables in main.ts, shaders.ts, and benchmark.ts. The build doesn't type-check. Scenes are copied with `cp -r` ([package.json:8](../package.json#L8)). | Fix in week 1 and gate CI on it. |
+| **Product** | Simulation library at the root, Sponza settings/preview, actual device details, cancellable benchmark, results table, and manual CSV export. | Persistent history, ranked scores, and leaderboard remain planned. |
+| **Build hygiene** | Existing TypeScript errors are fixed. `npm run build` type-checks, bundles, and copies assets with a portable Node script. Five Playwright checks cover the UI and WebGPU flow. | Browser integration checks require WebGPU; the Pages build runs TypeScript validation. |
 | **Hosting** | GitHub Pages can't set response headers. [vite.config.ts](../vite.config.ts) allows `renderrank.tonyxtian.com` as a *dev-server* host. | We need COOP/COEP headers (finer timers) and a real production host, not `vite dev`. |
 
 ---

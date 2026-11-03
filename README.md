@@ -2,7 +2,7 @@
 
 **Cross-platform 3D rendering GPU benchmarks in the browser.**
 
-RenderRank is a WebGPU benchmark suite that runs entirely in the browser. Pick a scene, adjust its rendering features, run a controlled test, and compare the results across your own devices. With your consent, you can also submit them to a public leaderboard.
+RenderRank runs WebGPU rendering tests in the browser. Select Sponza, choose a resolution, preview the scene, or run a light-count sweep and export frame-time results as CSV. Ranked scores, saved history, and a public leaderboard are planned.
 
 **Live build:** [renderrank.tonyxtian.com](https://renderrank.tonyxtian.com)
 
@@ -36,15 +36,15 @@ Existing tools cover parts of this need. RenderRank focuses on configurable WebG
 | 3DMark | Rich native graphics tests, including cross-platform tests | Requires a native app. Platform support varies by test. |
 | Basemark Web 3.0 | Browser benchmark with WebGL graphics and broader web tests | Doesn't run any visual benchmarks; it only simulates GPU load. |
 
-RenderRank's distinction is adjustable scene features, repeatable presets, and personal result history in a single browser workflow.
+The planned suite combines adjustable scene features, repeatable presets, and personal result history in a single browser workflow.
 
 ## How it works
 
-1. **Choose a scene.** Adjust crowds, lighting, post-processing, and screen-space effects.
-2. **Run a controlled test.** Track FPS, frame times, and rendering throughput.
-3. **Save and compare.** Review results across your devices, and submit to the public leaderboard only if you choose to.
+1. **Choose a scene.** The landing page currently lists Sponza. Select 1080p, 1440p, or 2160p.
+2. **Preview or benchmark.** Preview supports free-camera movement and 1–5,000 point lights. Benchmark sweeps 500–5,000 lights in 500-light increments; use Back to stop.
+3. **Export results.** Review average, minimum, and maximum frame times, then download CSV. Results remain available until the page is reloaded.
 
-**Ranked runs** use locked presets so scores stay comparable. **Custom runs** let you explore any combination of settings.
+The current benchmark measures display-paced frame intervals, which are limited by refresh rate. It does not produce a ranked GPU throughput score. Each light count receives 30 warmup frames and 120 measured frames. Keep the tab visible during a run.
 
 *Stretch goal:* a diffusion image-generation benchmark.
 
@@ -52,8 +52,8 @@ RenderRank's distinction is adjustable scene features, repeatable presets, and p
 
 1. **Clustered lighting.** A GPU compute pass assigns lights to 3D view-space clusters, then shading uses each cluster's light list.
 2. **Browser-based.** There's no software to download and no environment to set up. A benchmark starts with one click.
-3. **Repeatable measurement.** Each run fixes the scene seed, camera path, resolution, and version. It warms up, repeats the run, and reports the variation.
-4. **Comparable results.** Display FPS is reported separately from completed-work throughput. Optional GPU timestamps are treated as diagnostics only.
+3. **Repeatable measurement (planned).** Fix the scene seed, camera path, resolution, and version; repeat runs and report variation.
+4. **Comparable results (planned).** Report completed-work throughput separately from display FPS, with GPU timestamps used only as diagnostics.
 
 ## Who it's for
 
@@ -61,7 +61,7 @@ RenderRank's distinction is adjustable scene features, repeatable presets, and p
 - **Web developers** can explore rendering bottlenecks on varied devices and choose suitable quality settings.
 - **3D artists** can use interactive scenes to check how a 3D scene performs on a GPU, without writing code.
 
-**Responsible design:** sharing is opt-in, device metadata is kept to a minimum, and results are grouped by test version and environment.
+**Responsible design:** device details are read from browser APIs. The current UI does not upload results; future sharing will be opt-in.
 
 ## Milestones (Fall 2026)
 
@@ -105,6 +105,19 @@ npm run dev     # Vite dev server on http://127.0.0.1:5174
 npm run build   # production build to dist/ (the scenes/ folder is copied in too)
 ```
 
+The root URL opens the scene library. Scene assets and the renderer load only when Preview or Run benchmark is selected. The device panel shows the GPU model, OS, browser version, and logical core count when the browser exposes them.
+
+To run the browser checks:
+
+```bash
+npx playwright install chromium
+npm run test:browser
+```
+
+Tests start or reuse a local server on port 5175 and require WebGPU. Set `PREVIEW_URL` to test another running server. `npm run build` also checks TypeScript and copies scene assets using the portable Node script in `scripts/`.
+
+Merging into `main` triggers the GitHub Pages deployment. The deployed root also opens the scene library; asset paths support the configured Vite base URL.
+
 ## Repository layout
 
 ```
@@ -122,9 +135,14 @@ src/
   stage/            camera, lights, and glTF scene loading
   testing/          benchmark runner
 scenes/sponza/      Sponza glTF scene and textures
+scripts/            portable production asset copying
+tests/              Playwright UI and WebGPU integration checks
 doc/                project documents (kickoff presentation)
 ```
 
 ## Documents
 
 - [Kickoff presentation](doc/kickoff_presentation.pdf)
+- [Implementation plan and current status](doc/implementation_plan.md)
+- [Scene registration and contributor instructions](AGENTS.md)
+- [Preview image source and credits](img/README.md)

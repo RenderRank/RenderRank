@@ -65,7 +65,9 @@ npm run dev -- --port 5175
 npm run test:browser
 ```
 
-The Vite default port is 5174. The browser test default is 5175 so an existing dev session can remain undisturbed. Set `PREVIEW_URL` to test another running server. Browser tests require WebGPU; Linux/CI may require a supported GPU or a software WebGPU adapter. Browser installation/launch may need sandbox approval.
+The Vite default port is 5174. Browser tests start or reuse a server on 5175 so an existing dev session can remain undisturbed. Set `PREVIEW_URL` to test another running server. Browser tests require WebGPU; Linux/CI may require a supported GPU or a software WebGPU adapter. Browser installation/launch may need sandbox approval.
+
+`npm run build` runs TypeScript validation, Vite, then `scripts/copy-scenes.mjs`. Preserve the explicit `dist/scenes/` destination; shell `cp` handles trailing slashes differently on macOS and Linux.
 
 The tests cover the root landing page, lazy scene loading, settings, mobile overflow, unsupported browsers, renderer reopen/resolution changes, benchmark cancellation, and CSV export. When adding scenes, update the current one-scene count assertion and add coverage that selects and actually renders each scene. Check browser console output for missing assets, shader validation errors, and lost devices.
 
