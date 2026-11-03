@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --open",
-    "build": "tsc --noEmit && vite build && cp -r scenes/ dist/",
+    "build": "tsc --noEmit && vite build && node scripts/copy-scenes.mjs",
     "test:browser": "playwright test"
   },
   "devDependencies": {
