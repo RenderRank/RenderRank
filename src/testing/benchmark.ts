@@ -33,7 +33,7 @@ export class BenchmarkRunner {
         this.onCompleteCallback = callback;
     }
 
-    async runBenchmark() {
+    async runBenchmark(signal?: AbortSignal) {
         if (this.isRunning) {
             console.warn('Benchmark already running');
             return;
@@ -59,19 +59,20 @@ export class BenchmarkRunner {
                 this.stage.lights.numLights = numLights;
                 this.stage.lights.updateLightSetUniformNumLights();
 
-                const result = await this.benchmarkConfiguration(numLights);
+                const result = await this.benchmarkConfiguration(numLights, signal);
                 this.results.push(result);
 
                 this.log(`  Avg: ${result.avgFrameTimeMs.toFixed(2)}ms, Min: ${result.minFrameTimeMs.toFixed(2)}ms, Max: ${result.maxFrameTimeMs.toFixed(2)}ms`);
             }
 
-            this.log('Benchmark complete! Generating CSV...');
+            this.log('Benchmark complete.');
 
             if (this.onCompleteCallback) {
                 this.onCompleteCallback(this.results);
             }
 
         } finally {
+            this.isCollecting = false;
             // Unregister frame time callback
             this.driver.setFrameTimeCallback(null);
 
@@ -82,14 +83,14 @@ export class BenchmarkRunner {
         }
     }
 
-    private async benchmarkConfiguration(numLights: number): Promise<BenchmarkResult> {
-        await this.waitFrames(30);
+    private async benchmarkConfiguration(numLights: number, signal?: AbortSignal): Promise<BenchmarkResult> {
+        await this.waitFrames(30, signal);
 
         this.frameTimes = [];
         this.isCollecting = true;
 
         const numSampleFrames = 120;
-        await this.collectFrameTimes(numSampleFrames);
+        await this.collectFrameTimes(numSampleFrames, signal);
 
         this.isCollecting = false;
 
@@ -105,20 +106,8 @@ export class BenchmarkRunner {
         };
     }
 
-    private collectFrameTimes(numFrames: number): Promise<void> {
-        return new Promise<void>((resolve) => {
-            let framesCollected = 0;
-
-            const collectFrame = () => {
-                if (this.frameTimes.length >= numFrames) {
-                    resolve();
-                } else {
-                    requestAnimationFrame(collectFrame);
-                }
-            };
-
-            requestAnimationFrame(collectFrame);
-        });
+    private collectFrameTimes(numFrames: number, signal?: AbortSignal): Promise<void> {
+        return this.waitUntil(() => this.frameTimes.length >= numFrames, signal);
     }
 
     captureFrameTime(frameTimeMs: number) {
@@ -127,20 +116,26 @@ export class BenchmarkRunner {
         }
     }
 
-    private waitFrames(numFrames: number): Promise<void> {
-        return new Promise<void>((resolve) => {
-            let framesWaited = 0;
+    private waitFrames(numFrames: number, signal?: AbortSignal): Promise<void> {
+        let framesWaited = 0;
+        return this.waitUntil(() => ++framesWaited >= numFrames, signal);
+    }
 
-            const waitFrame = () => {
-                framesWaited++;
-                if (framesWaited >= numFrames) {
-                    resolve();
-                } else {
-                    requestAnimationFrame(waitFrame);
-                }
+    private waitUntil(complete: () => boolean, signal?: AbortSignal): Promise<void> {
+        return new Promise<void>((resolve, reject) => {
+            let request = 0;
+            const cleanup = () => {
+                cancelAnimationFrame(request);
+                signal?.removeEventListener('abort', abort);
             };
-
-            requestAnimationFrame(waitFrame);
+            const abort = () => { cleanup(); reject(new DOMException('Benchmark stopped', 'AbortError')); };
+            const tick = () => {
+                if (complete()) { cleanup(); resolve(); }
+                else request = requestAnimationFrame(tick);
+            };
+            if (signal?.aborted) { abort(); return; }
+            signal?.addEventListener('abort', abort, { once: true });
+            request = requestAnimationFrame(tick);
         });
     }
 

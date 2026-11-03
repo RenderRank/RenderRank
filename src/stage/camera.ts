@@ -81,6 +81,8 @@ export class Camera {
     projectionVersion: number = 0;
 
     keys: { [key: string]: boolean } = {};
+    inputEnabled = false;
+    private readonly listeners = new AbortController();
 
     // resolution is the render target size, not the canvas size
     constructor (gpu: GpuContext, resolution: Resolution) {
@@ -102,13 +104,17 @@ export class Camera {
 
         this.rotateCamera(0, 0); // set initial camera vectors
 
-        window.addEventListener('keydown', (event) => this.onKeyEvent(event, true));
-        window.addEventListener('keyup', (event) => this.onKeyEvent(event, false));
-        window.onblur = () => this.keys = {}; // reset keys on page exit so they don't get stuck (e.g. on alt + tab)
+        const options = { signal: this.listeners.signal };
+        window.addEventListener('keydown', (event) => this.onKeyEvent(event, true), options);
+        window.addEventListener('keyup', (event) => this.onKeyEvent(event, false), options);
+        window.addEventListener('blur', () => this.keys = {}, options);
+        gpu.canvas.addEventListener('blur', () => this.keys = {}, options);
 
-        gpu.canvas.addEventListener('mousedown', () => gpu.canvas.requestPointerLock());
-        gpu.canvas.addEventListener('mouseup', () => document.exitPointerLock());
-        gpu.canvas.addEventListener('mousemove', (event) => this.onMouseMove(event));
+        gpu.canvas.addEventListener('mousedown', () => {
+            if (this.inputEnabled) void gpu.canvas.requestPointerLock()?.catch(() => {});
+        }, options);
+        gpu.canvas.addEventListener('mouseup', () => document.exitPointerLock(), options);
+        gpu.canvas.addEventListener('mousemove', (event) => this.onMouseMove(event), options);
     }
 
     setResolution(resolution: Resolution) {
@@ -124,6 +130,7 @@ export class Camera {
     }
 
     private onKeyEvent(event: KeyboardEvent, down: boolean) {
+        if (!this.inputEnabled || document.activeElement !== this.gpu.canvas) return;
         this.keys[event.key.toLowerCase()] = down;
         if (this.keys['alt']) { // prevent issues from alt shortcuts
             event.preventDefault();
@@ -151,8 +158,20 @@ export class Camera {
         this.cameraUp = vec3.normalize(vec3.cross(this.cameraRight, this.cameraFront));
     }
 
+    resetOrientation(yaw = 0, pitch = 0) {
+        this.yaw = yaw;
+        this.pitch = pitch;
+        this.rotateCamera(0, 0);
+    }
+
+    destroy() {
+        this.inputEnabled = false;
+        this.keys = {};
+        this.listeners.abort();
+    }
+
     private onMouseMove(event: MouseEvent) {
-        if (document.pointerLockElement === this.gpu.canvas) {
+        if (this.inputEnabled && document.pointerLockElement === this.gpu.canvas) {
             this.rotateCamera(event.movementX * this.sensitivity, event.movementY * this.sensitivity);
         }
     }

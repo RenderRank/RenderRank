@@ -1,7 +1,5 @@
 // CHECKITOUT: this file loads all the shaders and preprocesses them with some common code
 
-import { Camera } from '../stage/camera';
-
 import commonRaw from './common.wgsl?raw';
 
 import fullscreenVertRaw from './fullscreen.vs.wgsl?raw';
