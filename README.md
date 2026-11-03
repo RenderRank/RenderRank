@@ -91,7 +91,9 @@ The codebase starts from a WebGPU renderer (TypeScript + Vite) that draws the Sp
 
 The original naive and Forward+ renderers were removed because no benchmark test uses them. They're still in git history.
 
-It also has a basic frame-time benchmark runner in `src/testing/benchmark.ts`. The scene controls, fixed-run protocol, result storage, and leaderboard described above are still to be built.
+The root page opens a simulation library with the Sponza scene, resolution and preview light controls, a lazy-loaded interactive viewer, device information, benchmark progress, and CSV export. The basic frame-time benchmark runner lives in `src/testing/benchmark.ts`. A fixed-run protocol, persistent result storage, and leaderboard remain to be built.
+
+Scene registration instructions and current loader limitations are in [AGENTS.md](AGENTS.md). The scene catalog is `src/simulations.ts`.
 
 ## Getting started
 
@@ -107,7 +109,10 @@ npm run build   # production build to dist/ (the scenes/ folder is copied in too
 
 ```
 src/
-  main.ts           entry point: WebGPU init, scene loading, GUI
+  main.ts           simulation library, controls, viewer, results, and CSV export
+  simulations.ts    scene catalog and render resolutions
+  simulation.ts     lazy WebGPU session and renderer lifecycle
+  device.ts         browser-reported GPU, system, and browser details
   gpu/              GpuContext (adapter, device, canvas, recorded adapter info) and mipmap generation
   renderer.ts       renderer base: encodes frames into offscreen targets at a fixed resolution
   renderers/        clustered deferred renderer

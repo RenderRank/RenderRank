@@ -49,6 +49,7 @@ export class GpuContext {
 
     readonly modelBindGroupLayout: GPUBindGroupLayout;
     readonly materialBindGroupLayout: GPUBindGroupLayout;
+    private readonly resizeObserver: ResizeObserver;
 
     static async create(canvas: HTMLCanvasElement, options: GpuContextOptions = {}): Promise<GpuContext> {
         if (!navigator.gpu) {
@@ -93,13 +94,14 @@ export class GpuContext {
 
         this.lost = device.lost;
         this.lost.then((lostInfo) => {
-            console.error(`WebGPU device lost (${lostInfo.reason}): ${lostInfo.message}`);
+            if (lostInfo.reason !== 'destroyed') console.error(`WebGPU device lost (${lostInfo.reason}): ${lostInfo.message}`);
         });
 
         this.canvas = canvas;
         this.resizeCanvas();
         // Frames render offscreen at a fixed resolution, so resizing only changes the final present blit
-        new ResizeObserver(() => this.resizeCanvas()).observe(canvas);
+        this.resizeObserver = new ResizeObserver(() => this.resizeCanvas());
+        this.resizeObserver.observe(canvas);
 
         this.canvasContext = canvas.getContext("webgpu")!;
         this.canvasFormat = navigator.gpu.getPreferredCanvasFormat();
@@ -161,6 +163,12 @@ export class GpuContext {
                 }
             ]
         });
+    }
+
+    destroy() {
+        this.resizeObserver.disconnect();
+        this.canvasContext.unconfigure();
+        this.device.destroy();
     }
 
     // Matches the canvas backing store to its on-screen size in device pixels

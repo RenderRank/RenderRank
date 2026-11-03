@@ -20,6 +20,8 @@ export class DisplayDriver {
     }
 
     start(): void {
+        this.stop();
+        this.prevTime = 0;
         this.frameRequestId = requestAnimationFrame((t) => this.onFrame(t));
     }
 
