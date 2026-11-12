@@ -1,4 +1,4 @@
-import { simulations, renderResolutions, stabilityPassMark, stressLoopRange } from './simulations';
+import { simulations, renderResolutions, stabilityPassMark, stressLoopRange, maxPointLights } from './simulations';
 import type { Simulation } from './simulations';
 import { inspectDevice } from './device';
 import type { SimulationSession } from './simulation';
@@ -94,7 +94,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
                         <div id="loop-settings" hidden><label class="field-label" for="loops">Loops</label>
                         <input id="loops" class="number-input" type="number" min="${stressLoopRange.min}" max="${stressLoopRange.max}" step="1" inputmode="numeric" value=""></div>
                         <div id="light-settings"><div class="light-heading"><label class="field-label" for="lights">Point lights</label><output id="light-value" for="lights">500</output></div>
-                        <input id="lights" type="range" min="1" max="5000" step="1" value="500"><div class="range-labels"><span>1</span><span>5,000</span></div></div>
+                        <input id="lights" type="range" min="1" max="${maxPointLights}" step="1" value="500" style="--range-progress: ${(499 / (maxPointLights - 1) * 100).toFixed(2)}%"><div class="range-labels"><span>1</span><span>${maxPointLights.toLocaleString('en-US')}</span></div></div>
                         <div class="run-actions"><button id="run" class="button primary">${icon('play')}<span id="run-label">Run benchmark</span></button><button id="preview" class="button secondary">Preview scene${icon('arrow')}</button></div>
                         <p id="run-note" class="run-note"></p>
                         <a id="last-result" class="last-result" href="#/results" hidden>View last result${icon('arrow')}</a>
@@ -111,7 +111,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
                 <h2 class="section-title">Frame time over the run</h2>
                 <div id="frame-chart" class="frame-chart"></div>
                 <h2 class="section-title" id="table-title">By segment</h2>
-                <div class="table-scroll"><table><thead><tr><th id="result-label">Point lights</th><th id="result-score" hidden>Score</th><th>Avg. frame time</th><th>Min.</th><th>Max.</th><th id="result-gpu" hidden>Avg. GPU pass</th></tr></thead><tbody id="result-rows"></tbody></table></div>
+                <div class="table-scroll"><table><thead><tr><th id="result-label">Point lights</th><th id="result-score" hidden>Score</th><th>Avg. frame time</th><th>Min.</th><th>Max.</th><th id="result-gpu" hidden>Avg. GPU time</th></tr></thead><tbody id="result-rows"></tbody></table></div>
                 <p id="result-note" class="run-note"></p>
                 <h2 class="section-title">Run report</h2>
                 <p class="run-note report-intro">Export JSON saves, and Upload score sends, exactly this report: the score, frame times, and table above, and every detail below. It contains no IP address, language, or time zone.</p>
@@ -164,8 +164,9 @@ function selectSimulation(scene: Simulation) {
     element('spec-materials').textContent = scene.materials;
     element('light-settings').hidden = scene.kind !== 'gltf';
     element('test-settings').hidden = !scene.stress;
-    if (!scene.stress) testMode.value = 'benchmark';
-    else if (changed || loopsInput.value === '') loopsInput.value = String(scene.stress.defaultLoops);
+    // A different scene starts on its benchmark, not on a stress test chosen for the last one
+    if (!scene.stress || changed) testMode.value = 'benchmark';
+    if (scene.stress && (changed || loopsInput.value === '')) loopsInput.value = String(scene.stress.defaultLoops);
     updateRunMode();
     const image = element<HTMLImageElement>('scene-image');
     image.src = scene.preview;
@@ -236,7 +237,7 @@ window.addEventListener('hashchange', showScreen);
 
 lights.addEventListener('input', () => {
     element('light-value').textContent = Number(lights.value).toLocaleString();
-    lights.style.setProperty('--range-progress', `${(Number(lights.value) - 1) / 4999 * 100}%`);
+    lights.style.setProperty('--range-progress', `${(Number(lights.value) - 1) / (maxPointLights - 1) * 100}%`);
 });
 
 function showCompatibility(message: string) {
@@ -275,8 +276,7 @@ void checkGpu();
 function segmentLabel(message: string): string | undefined {
     const loop = message.match(/^Loop (\d+) of \d+/);
     if (loop) return `Loop ${loop[1]}`;
-    return message.match(/^Testing with (\d+) lights/)?.[1].replace(/\B(?=(\d{3})+$)/g, ',')
-        ?? message.match(/^Shot \d+ of \d+ · (.+)$/)?.[1];
+    return message.match(/^Shot \d+ of \d+ · (.+)$/)?.[1];
 }
 
 async function openSimulation(benchmark: boolean) {
@@ -408,7 +408,9 @@ function msCell(value: number | null): HTMLTableCellElement {
 function renderResults() {
     const { report, file, uploadedId } = shown!;
     const scene = simulations.find(candidate => candidate.id === report.scene.id);
-    const resultLabel = report.stress ? 'Loop' : scene?.resultLabel ?? 'Segment';
+    // Reports from Sponza's old light-count sweep have light counts for rows and were paced by the display
+    const lightSweep = report.rows.some(row => row.numLights !== null);
+    const resultLabel = report.stress ? 'Loop' : lightSweep ? 'Point lights' : scene?.resultLabel ?? 'Segment';
     const back = element<HTMLAnchorElement>('results-back');
     back.href = scene ? `#/scene/${scene.id}` : '#/';
     back.lastChild!.textContent = scene ? 'Back to scene' : 'All simulations';
@@ -456,7 +458,9 @@ function renderResults() {
         if (hasGpuTimes) tr.append(msCell(row.avgGpuTimeMs));
         return tr;
     }));
-    element('result-note').textContent = (stress ? scene?.stress?.resultNote : scene?.resultNote) ?? '';
+    element('result-note').textContent = lightSweep
+        ? 'Display-paced frame times from the old light-count sweep, limited by the refresh rate. They don’t compare with scored runs.'
+        : (stress ? scene?.stress?.resultNote : scene?.resultNote) ?? '';
     renderReport(element('report'), report);
 
     // An opened report can't be uploaded from here; Upload score is for runs measured in this tab

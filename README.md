@@ -2,7 +2,7 @@
 
 **Cross-platform 3D rendering GPU benchmarks in the browser.**
 
-RenderRank runs WebGPU rendering tests in the browser. Select a scene, choose a resolution, preview it, or run its benchmark and save the full run report as JSON to open again later. Sponza runs a light-count sweep; the procedural Orrery plays a fixed 40-second camera path. You can sign in with Google. Saved history for signed-in users, ranked scores, and a public leaderboard are planned.
+RenderRank runs WebGPU rendering tests in the browser. Select a scene, choose a resolution, preview it, or run its benchmark and save the full run report as JSON to open again later. Both scenes benchmark the same way: a fixed 40-second camera path rendered without a frame-rate cap, scored from the frames finished. You can sign in with Google. Saved history for signed-in users, ranked scores, and a public leaderboard are planned.
 
 **Live build:** [renderrank.tonyxtian.com](https://renderrank.tonyxtian.com)
 
@@ -42,11 +42,12 @@ The planned suite combines adjustable scene features, repeatable presets, and pe
 
 1. **Choose a scene.** The library lists the Orrery and Sponza. Each card opens that scene's setup screen.
 2. **Set up, then preview or benchmark.** Pick 1080p, 1440p, or 2160p. A live frame-time graph sits beside the FPS readout, with dashed lines at 8.3, 16.7, and 33.3 ms (120, 60, and 30 FPS); use Back to stop.
-   - **Sponza:** preview has a free camera and 1–5,000 point lights. The benchmark sweeps 500–5,000 lights in 500-light steps, with 30 warm-up and 120 measured frames each.
-   - **Orrery:** it plays a fixed 40-second camera path. Preview loops it, and the benchmark plays it once without a frame-rate cap. The **stress test** plays it back to back, 20 times by default (set 2–100 in Loops), and reports frame-rate stability: the lowest loop score as a percentage of the highest. 97% or more passes. Twenty loops take about 13 minutes.
-3. **Review the results.** The results screen shows the Orrery's score (or a stress test's stability), a frame-time graph of the whole run, a per-light-count, per-shot, or per-loop table, and the full run report: device, browser, display, WebGPU adapter, workload constants, features, limits, and the exact JSON. **Export JSON** downloads that report exactly as printed, and **Upload score** saves it on the server unchanged. Results last until the page is reloaded, but **Open report** on the library screen (or dropping the file there) shows a saved report again, looking exactly as it did when the run finished. It also opens files from the server's `results/` folder.
+   - **Sponza:** preview has a free camera and a light slider. The benchmark flies a fixed 40-second path through the courtyard, an aisle, the upper gallery, and up toward the roof, with 8,000 point lights on fixed paths and fixed colors, so every run renders the same frames.
+   - **Orrery:** it plays a fixed 40-second camera path. Preview loops it.
+   - **Both:** the benchmark plays the path once without a frame-rate cap. The **stress test** plays it back to back, 20 times by default (set 2–100 in Loops), and reports frame-rate stability: the lowest loop score as a percentage of the highest. 97% or more passes. Twenty loops take about 13 minutes.
+3. **Review the results.** The results screen shows the score (or a stress test's stability), a frame-time graph of the whole run, a per-shot or per-loop table, and the full run report: device, browser, display, WebGPU adapter, workload constants, features, limits, and the exact JSON. **Export JSON** downloads that report exactly as printed, and **Upload score** saves it on the server unchanged. Results last until the page is reloaded, but **Open report** on the library screen (or dropping the file there) shows a saved report again, looking exactly as it did when the run finished. It also opens files from the server's `results/` folder.
 
-Sponza's benchmark measures display-paced frame intervals, which are capped by the refresh rate, so it has no score. The Orrery's score is 100 × the harmonic mean of its four shots' frame rates. It isn't ranked against other devices yet, and it compares only at the same resolution. Keep the tab visible during a run: a hidden tab invalidates the score.
+A scene's score is 100 × the harmonic mean of its four shots' frame rates. Frames render offscreen, back to back, so the score isn't capped by the display. It isn't ranked against other devices yet, and it compares only at the same resolution and workload. Keep the tab visible during a run: a hidden tab invalidates the score. Reports from the old Sponza light sweep still open, labeled as display-paced.
 
 *Stretch goal:* a diffusion image-generation benchmark.
 
@@ -55,7 +56,7 @@ Sponza's benchmark measures display-paced frame intervals, which are capped by t
 1. **Clustered lighting.** A GPU compute pass assigns lights to 3D view-space clusters, then shading uses each cluster's light list.
 2. **Browser-based.** There's no software to download and no environment to set up. A benchmark starts with one click.
 3. **Repeatable measurement (partly in place).** The Orrery fixes its camera path, animation, and resolution. Repeating runs, reporting variation, and versioning the workload are planned.
-4. **Comparable results (partly in place).** The Orrery's benchmark measures completed-work throughput offscreen, separately from display FPS. It reports GPU timestamps alongside, as diagnostics only. Sponza is still display-paced.
+4. **Comparable results (partly in place).** Both benchmarks measure completed-work throughput offscreen, separately from display FPS, and report GPU timestamps alongside as diagnostics. Neither repeats runs or reports variance yet.
 
 ## Who it's for
 
@@ -107,7 +108,7 @@ The app has three screens: the simulation library, a setup screen per scene (res
 
 Optional **Sign in with Google** runs entirely in the browser ([doc/auth.md](doc/auth.md)). Uploads don't carry the account yet.
 
-Sponza's light-sweep runner lives in `src/testing/benchmark.ts`, and the Orrery's throughput loop in `src/procedural/orrery_session.ts`. Still to be built:
+Both benchmarks run the same throughput loop (`src/testing/throughput.ts`) over a fixed camera timeline (`src/timeline.ts`; Sponza's shots are in `src/stage/sponza_timeline.ts`). Sponza's light colors are fixed per light and its light paths are a function of timeline time. Still to be built:
 
 - repeats and variance reporting;
 - a versioned workload;
@@ -158,12 +159,13 @@ src/
   gpu/              GpuContext (adapter, device, canvas, recorded adapter info) and mipmap generation
   renderer.ts       renderer base: encodes frames into offscreen targets at a fixed resolution
   renderers/        clustered deferred renderer (glTF scenes) and the Orrery ray-marcher
-  procedural/       the Orrery's camera/animation timeline and its session loop
+  procedural/       the Orrery's camera/animation timeline and its session
+  timeline.ts       fixed camera timelines: shots of spline paths, a pure function of time
   passes/           shared passes: tonemap, present (scaled blit to the canvas)
   drivers/          frame loops; DisplayDriver is the rAF-paced one
   shaders/          WGSL shaders and the constants injected into them
-  stage/            camera, lights, and glTF scene loading
-  testing/          benchmark runner
+  stage/            camera, lights, glTF scene loading, and Sponza's benchmark timeline
+  testing/          the shared throughput loop and result types
 scenes/sponza/      Sponza glTF scene and textures
 scripts/            portable scene-asset copying; results upload endpoint (dev/preview server)
 tests/              Playwright UI and WebGPU integration checks; fake Google sign-in script

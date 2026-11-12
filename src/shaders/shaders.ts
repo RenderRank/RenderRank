@@ -10,6 +10,7 @@ import clusteredDeferredFragRaw from './clustered_deferred.fs.wgsl?raw';
 import clusteredDeferredFullscreenFragRaw from './clustered_deferred_fullscreen.fs.wgsl?raw';
 
 import tonemapFragRaw from './tonemap.fs.wgsl?raw';
+import { sponzaBenchmarkLights } from '../simulations';
 
 import orreryFragRaw from './orrery.fs.wgsl?raw';
 
@@ -41,8 +42,12 @@ export const constants = {
     clusteringWorkgroupSize: 64, // 1D, one cluster per invocation; also the light batch size in shared memory
     lightCullingWorkgroupSize: 128,
     // Capacity of the light index list shared by all clusters (8 MB). Past it, lights get dropped and an overflow flag
-    // is set. Sponza's opening view needs ~48k at 500 lights and ~560k at 5000.
+    // is set. Sponza's benchmark timeline peaks at ~1.06M with its 8,000 lights; keep it well under this, because which
+    // lights an overflow drops varies from run to run.
     maxClusterLightIndices: 1 << 21,
+
+    // Not used by shaders; listed so every report records it with the rest of the workload
+    sponzaBenchmarkLights,
 
     // Scales HDR lighting before the tone curve. Tuned by eye for Sponza at the current light intensity.
     toneMappingExposure: 1.7,

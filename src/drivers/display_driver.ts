@@ -63,6 +63,7 @@ export class DisplayDriver {
         this.renderer.encodeFrame(encoder);
         this.presentPass.encode(encoder);
         device.queue.submit([encoder.finish()]);
+        this.renderer.afterSubmit();
 
         this.stage.stats.end();
 

@@ -2,6 +2,7 @@ import * as renderer from '../renderer';
 import * as shaders from '../shaders/shaders';
 import { Stage } from '../stage/stage';
 import { TonemapPass } from '../passes/tonemap';
+import { PassTimer } from '../gpu/pass_timer';
 
 export class ClusteredDeferredRenderer extends renderer.Renderer {
     // G-buffer textures: 8 bytes per pixel plus depth. World position isn't stored; it's rebuilt from depth.
@@ -29,6 +30,10 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
 
     gBufferPipeline: GPURenderPipeline;
     fullscreenPipeline: GPURenderPipeline;
+
+    // Times light clustering, the G-buffer pass, and the lighting pass: everything but the tonemap
+    private timer: PassTimer;
+    override get gpuTimeMs() { return this.timer.gpuTimeMs; }
 
     constructor(stage: Stage) {
         super(stage);
@@ -74,6 +79,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
 
         this.tonemapPass = new TonemapPass(this.gpu, this.hdrTexture);
         this.outputTexture = this.tonemapPass.outputTexture;
+        this.timer = new PassTimer(this.gpu);
 
         this.gBufferBindGroupLayout = this.gpu.device.createBindGroupLayout({
             label: "clustered deferred G-buffer bind group layout",
@@ -241,7 +247,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
 
     override encodeFrame(encoder: GPUCommandEncoder) {
         // Run clustering compute shader
-        this.lights.doLightClustering(encoder);
+        this.lights.doLightClustering(encoder, this.timer.begin);
 
         // G-buffer pass
         const gBufferPass = encoder.beginRenderPass({
@@ -293,7 +299,8 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                     loadOp: "clear",
                     storeOp: "store"
                 }
-            ]
+            ],
+            timestampWrites: this.timer.end
         });
 
         fullscreenPass.setPipeline(this.fullscreenPipeline);
@@ -301,8 +308,13 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
         fullscreenPass.draw(6); // Draw 6 vertices (2 triangles for fullscreen quad)
 
         fullscreenPass.end();
+        this.timer.resolve(encoder);
 
         this.tonemapPass.encode(encoder);
+    }
+
+    override afterSubmit() {
+        this.timer.afterSubmit();
     }
 
     override destroy() {
@@ -311,5 +323,6 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
         this.depthTexture.destroy();
         this.hdrTexture.destroy();
         this.tonemapPass.destroy();
+        this.timer.destroy();
     }
 }

@@ -2,7 +2,9 @@ import { GpuContext } from '../gpu/context';
 import { Resolution } from '../renderer';
 import * as shaders from '../shaders/shaders';
 import { TonemapPass } from '../passes/tonemap';
-import { cameraAt, mechanismAt, Vec3 } from '../procedural/orrery_timeline';
+import { PassTimer } from '../gpu/pass_timer';
+import { mechanismAt, orreryTimeline } from '../procedural/orrery_timeline';
+import type { Vec3 } from '../timeline';
 
 function normalize(v: Vec3): Vec3 {
     const length = Math.hypot(v[0], v[1], v[2]);
@@ -32,14 +34,9 @@ export class OrreryRenderer {
     private bindGroup: GPUBindGroup;
     private pipeline: GPURenderPipeline;
 
-    // GPU time of the ray-marching pass, when the device supports timestamp queries. The browser quantizes these, so
-    // they are a diagnostic, but unlike frame intervals they aren't rounded up to the display's refresh period.
-    private querySet?: GPUQuerySet;
-    private queryResolveBuffer?: GPUBuffer;
-    private queryReadBuffer?: GPUBuffer;
-    private queryReadPending = false;
-    private queryCopied = false;
-    gpuTimeMs: number | undefined;
+    // Times the ray-marching pass
+    private timer: PassTimer;
+    get gpuTimeMs() { return this.timer.gpuTimeMs; }
 
     constructor(gpu: GpuContext, resolution: Resolution) {
         this.gpu = gpu;
@@ -109,22 +106,12 @@ export class OrreryRenderer {
             }
         });
 
-        if (gpu.hasTimestampQuery) {
-            this.querySet = gpu.device.createQuerySet({ type: "timestamp", count: 2 });
-            this.queryResolveBuffer = gpu.device.createBuffer({
-                size: 16,
-                usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC
-            });
-            this.queryReadBuffer = gpu.device.createBuffer({
-                size: 16,
-                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
-            });
-        }
+        this.timer = new PassTimer(gpu);
     }
 
     // Poses the camera and mechanism for timeline time t (seconds)
     setTime(t: number) {
-        const camera = cameraAt(t);
+        const camera = orreryTimeline.cameraAt(t);
         const forward = normalize([
             camera.target[0] - camera.position[0],
             camera.target[1] - camera.position[1],
@@ -170,50 +157,26 @@ export class OrreryRenderer {
                     storeOp: "store"
                 }
             ],
-            timestampWrites: this.querySet && {
-                querySet: this.querySet,
-                beginningOfPassWriteIndex: 0,
-                endOfPassWriteIndex: 1
-            }
+            timestampWrites: this.timer.both
         });
         pass.setPipeline(this.pipeline);
         pass.setBindGroup(0, this.bindGroup);
         pass.draw(6);
         pass.end();
 
-        // One readback in flight at a time; frames in between go unmeasured rather than stalling
-        if (this.querySet && !this.queryReadPending) {
-            encoder.resolveQuerySet(this.querySet, 0, 2, this.queryResolveBuffer!, 0);
-            encoder.copyBufferToBuffer(this.queryResolveBuffer!, 0, this.queryReadBuffer!, 0, 16);
-            this.queryCopied = true;
-        }
+        this.timer.resolve(encoder);
 
         this.tonemapPass.encode(encoder);
     }
 
     afterSubmit() {
-        if (!this.queryCopied) {
-            return;
-        }
-        this.queryCopied = false;
-        this.queryReadPending = true;
-        const buffer = this.queryReadBuffer!;
-        buffer.mapAsync(GPUMapMode.READ).then(() => {
-            const [begin, end] = new BigInt64Array(buffer.getMappedRange());
-            if (end > begin) {
-                this.gpuTimeMs = Number(end - begin) / 1e6;
-            }
-            buffer.unmap();
-            this.queryReadPending = false;
-        }).catch(() => { /* the buffer was destroyed with the renderer */ });
+        this.timer.afterSubmit();
     }
 
     destroy() {
         this.hdrTexture.destroy();
         this.tonemapPass.destroy();
         this.uniformsBuffer.destroy();
-        this.querySet?.destroy();
-        this.queryResolveBuffer?.destroy();
-        this.queryReadBuffer?.destroy();
+        this.timer.destroy();
     }
 }

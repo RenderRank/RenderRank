@@ -4,7 +4,7 @@
 
 *Status updated 2026-11-12 (`main` at `4c51040`). In place:*
 
-- *Two scenes: Sponza (clustered deferred, display-paced light sweep) and the procedural **Orrery**. The Orrery has a fixed 40-second camera path, an uncapped throughput benchmark and a score.*
+- *Two scenes, Sponza (clustered deferred, 8,000 lights) and the procedural **Orrery**, both benchmarked the same way: a fixed 40-second camera path in an uncapped throughput loop, with a score and a stress test.*
 - *A three-screen frontend (library, scene setup, results) with live and full-run frame-time graphs, JSON export of the full run report (which the library can open again), and **Upload score**, which saves runs as JSON on the VPS.*
 - *Optional Sign in with Google (PR #3).*
 
@@ -17,7 +17,7 @@
 
 ## Summary
 
-RenderRank has a working WebGPU clustered renderer drawing Sponza with up to 5,000 lights, a procedural ray-marched scene (the Orrery) with an uncapped, scored benchmark, and a three-screen frontend that can upload results to the server. The product we want is a **benchmark**: fixed tests, a fixed protocol, one score, and a place to compare results. The throughput loop and a first score exist for the Orrery. The rest of the measurement protocol (repeats, variance, flags) and a real backend still need to be built.
+RenderRank has a working WebGPU clustered renderer drawing Sponza with up to 8,000 lights, a procedural ray-marched scene (the Orrery), one uncapped, scored benchmark procedure for both, and a three-screen frontend that can upload results to the server. The product we want is a **benchmark**: fixed tests, a fixed protocol, one score, and a place to compare results. The throughput loop and a first score exist for the Orrery. The rest of the measurement protocol (repeats, variance, flags) and a real backend still need to be built.
 
 The plan has four pillars:
 
@@ -67,7 +67,7 @@ What we can build on:
 - A clustered deferred renderer ([src/renderers/](../src/renderers/)). The original naive and Forward+ renderers were removed because no test uses them; git history has them.
 - GPU light clustering ([cluster_bounds.cs.wgsl](../src/shaders/cluster_bounds.cs.wgsl), [light_culling.cs.wgsl](../src/shaders/light_culling.cs.wgsl), [light_assignment.cs.wgsl](../src/shaders/light_assignment.cs.wgsl)) and GPU light animation ([move_lights.cs.wgsl](../src/shaders/move_lights.cs.wgsl)).
 - A glTF loader and scene graph ([scene.ts](../src/stage/scene.ts)), Sponza (262k triangles, 103 primitives, 25 materials, 69 textures, 51 MB on disk).
-- A light-count sweep benchmark for Sponza ([benchmark.ts](../src/testing/benchmark.ts)).
+- One benchmark procedure for both scenes ([throughput.ts](../src/testing/throughput.ts)) over fixed camera timelines ([timeline.ts](../src/timeline.ts)). Sponza's flies four shots through the courtyard, an aisle, the upper gallery and up toward the roof ([sponza_timeline.ts](../src/stage/sponza_timeline.ts)) with 8,000 lights whose colors are fixed per index and whose paths are a function of timeline time. It replaced the display-paced light sweep.
 - **The Orrery**, a procedural test scene with no meshes or textures. It is one SDF ray-marching fragment shader ([orrery.fs.wgsl](../src/shaders/orrery.fs.wgsl)) with soft shadows from two lights, AO, one reflection bounce and a shadowed volumetric sun shaft. A fixed 40-second, four-shot camera timeline drives it ([orrery_timeline.ts](../src/procedural/orrery_timeline.ts)). Its benchmark is the §3.1 throughput loop, with a harmonic-mean score ([orrery_session.ts](../src/procedural/orrery_session.ts)). Its **stress test** repeats that loop back to back (20 times by default, 2–100 allowed) after one warm-up, scores each loop, and reports frame-rate stability (lowest loop score ÷ highest, pass at 97%).
 - A three-screen frontend in plain TypeScript, with hash routes `#/`, `#/scene/<id>` and `#/results` ([main.ts](../src/main.ts)). It has:
   - a live frame-time sparkline in the viewer, with dashed lines at the 120, 60 and 30 FPS frame times, labeled in ms;
@@ -83,10 +83,10 @@ The gaps that matter for a benchmark:
 
 | Area | Current state | Why it matters |
 | --- | --- | --- |
-| **Vsync cap** | **Solved for the Orrery, not for Sponza.** The Orrery benchmark renders offscreen back to back (§3.1) and reached 178 FPS at 1080p on an RTX 5080 with a 120 Hz display. Sponza still times `requestAnimationFrame` intervals ([display_driver.ts](../src/drivers/display_driver.ts)), and in [img/benchmark_rtx5080.csv](../img/benchmark_rtx5080.csv) it floors at 8.33 ms (120 Hz). | Sponza's numbers still measure the display on fast GPUs, so it has no score. Moving it onto the throughput loop needs its light motion tied to a timeline. |
+| **Vsync cap** | **Solved for both scenes.** Both benchmarks render offscreen back to back (§3.1, [throughput.ts](../src/testing/throughput.ts)). The Orrery reached 178 FPS at 1080p on an RTX 5080 with a 120 Hz display. The old Sponza light sweep floored at 8.33 ms (120 Hz) in [img/benchmark_rtx5080.csv](../img/benchmark_rtx5080.csv); it is gone. | Escaping vsync is confirmed only on Chrome/Windows (§2.1). |
 | **Resolution** | Fixed in §6.2. Frames render offscreen at 1080p, 1440p, or 2160p, picked in the GUI ([main.ts](../src/main.ts)), and are letterboxed onto the canvas, which follows window resizes. Switching rebuilds the renderer's targets. | Tier presets (§3.2) should select these instead of the GUI. The old benchmark CSV doesn't record the resolution. |
-| **Determinism** | **Orrery:** camera and mechanism are pure functions of timeline time, with no randomness. **Sponza:** light colors use `Math.random()` ([lights.ts:204](../src/stage/lights.ts#L204)), light motion follows wall-clock rAF time ([lights.ts:233-234](../src/stage/lights.ts#L233-L234)), and the camera is keyboard/mouse only. | Sponza's workload still differs from run to run. |
-| **Protocol** | **Sponza:** 30 warm-up frames and 120 sample frames per light count, one pass, min/avg/max ([benchmark.ts](../src/testing/benchmark.ts)). **Orrery:** 30 warm-up frames at t = 0, then one 40 s pass. It reports per-shot average, best and worst quarter-second frame time, and GPU pass time, plus a score that is invalid if the tab was hidden. Neither scene repeats or reports variance, and pipelines still compile synchronously. | Two 2160p Orrery runs on the same RTX 5080 scored 8% apart (§2.1), far outside the ≤2% target. Repeats, a longer warm-up and a CV check (§3.4) are the next measurement work. |
+| **Determinism** | **Both scenes:** the camera follows a fixed timeline and everything rendered is a pure function of timeline time. Sponza's light colors are fixed per light index (golden-ratio hues) and its light positions are noise of (light index, timeline time). Its cluster light-index list peaks at about half its capacity on the timeline, so no lights are dropped. | Sponza's preview still uses wall-clock light motion and a free camera, by design. |
+| **Protocol** | **Both scenes:** 30 warm-up frames at t = 0, then one 40 s pass ([throughput.ts](../src/testing/throughput.ts)). It reports per-shot average, best and worst quarter-second frame time, and GPU pass time, plus a score that is invalid if the tab was hidden. Neither scene repeats or reports variance, and pipelines still compile synchronously. | Two 2160p Orrery runs on the same RTX 5080 scored 8% apart (§2.1), far outside the ≤2% target. Repeats, a longer warm-up and a CV check (§3.4) are the next measurement work. |
 | **Architecture** | Fixed in §6.1–6.2. `GpuContext` replaced the module-level globals. Renderers only encode frames, and a `DisplayDriver` ([display_driver.ts](../src/drivers/display_driver.ts)) owns the rAF loop. | The uncapped throughput driver (§3.1) still needs building on top. |
 | **Materials** | Fixed in §6.3–6.4. Textures are sRGB-correct and mipmapped. Lighting is HDR with an ACES tonemap and metallic-roughness PBR. Normal maps, glTF factors, and alpha modes are used. | There's no ambient or environment light yet, so unlit metal reads as black. |
 | **Clustering cost** | Fixed in §6.6. Clustering now runs as frustum culling, then shared-memory batched assignment into a compact 8 MB index list. It has no large private arrays. Light radius and cluster dimensions are still compile-time constants ([shaders.ts](../src/shaders/shaders.ts)). | Light radius can't change per preset yet (week 2). |
@@ -105,7 +105,8 @@ Uploaded runs as of 2026-11-12. The files are in `results/` on the VPS. Every ru
 | NVIDIA GeForce RTX 5080 | Windows | Orrery, 1080p | Score **17,785** (177.8 FPS) |
 | Apple M5 Max | macOS 27.3, on battery (86%) | Orrery, 1080p | Score **6,825** (68.3 FPS) |
 | iPhone (GPU reported only as `apple`) | iOS, Chrome 157 | Orrery, 1080p | Score **1,152** (11.5 FPS) |
-| Apple M1 | macOS 14.3.1 | Sponza, 1080p | 13.1 ms at 500 lights, rising roughly linearly to 95.9 ms at 5,000 |
+| Apple M1 | macOS 14.3.1 | Sponza light sweep (retired), 1080p | 13.1 ms at 500 lights, rising roughly linearly to 95.9 ms at 5,000 |
+| Apple M5 Max | macOS | Sponza timeline benchmark, 2160p, 8,000 lights (not uploaded) | Score **2,072** (20.7 FPS); 5,000 lights gave 3,074 (30.7 FPS), which set the light count |
 
 What these show:
 
@@ -206,7 +207,7 @@ Request the adapter with `powerPreference: 'high-performance'` so dual-GPU lapto
 
 - `performance.now()` is coarsened (100 µs or worse) unless the page is **cross-origin isolated**, which needs COOP/COEP response headers. Throughput over 30 s is fine at any resolution. Frame-interval percentiles need isolation to be meaningful, which is one reason to move hosting (see [§9.1](#91-stack)).
 - Request `timestamp-query` when the adapter offers it, and record **per-pass GPU time** (clustering, G-buffer, lighting, shadows, post). Values are quantized by the browser, so they're **diagnostics only**: shown as a breakdown chart, never used in the score.
-- **Status:** `GpuContext` requests the feature. The Orrery times its single ray-march pass, with one readback in flight and other frames skipped, and shows the result in the viewer and the results table. Every device in §2.1 exposed `timestamp-query`. Sponza's passes aren't timed yet (§6 item 9).
+- **Status:** `GpuContext` requests the feature. The Orrery times its single ray-march pass, with one readback in flight and other frames skipped, and shows the result in the viewer and the results table. Every device in §2.1 exposed `timestamp-query`. Sponza times from the start of light clustering to the end of the lighting pass ([pass_timer.ts](../src/gpu/pass_timer.ts)).
 
 ### 3.7 Scoring
 
@@ -361,7 +362,7 @@ Ordered so everything that changes the workload lands before the freeze.
    - The order of lights within a cluster now depends on atomics, so float summation order can vary frame to frame by about 1 LSB. Probe-hash tolerance (item 10) has to allow for that.
 7. **Shadows.** Cascaded shadow map for the sun (GT1).
 8. **GT2 pipeline** (with Stan). VAT instanced characters, compute culling and LOD into an indirect buffer, SSAO, bloom.
-9. **Diagnostics.** Per-pass timestamp queries resolved into a ring of readback buffers, so we never stall the GPU. *Partly done: the Orrery times its one pass (§3.6). Sponza's clustering, G-buffer and lighting passes aren't timed yet.*
+9. **Diagnostics.** Per-pass timestamp queries resolved into a ring of readback buffers, so we never stall the GPU. *Partly done: the Orrery times its one pass and Sponza times clustering through lighting as one span (§3.6). Per-pass breakdowns aren't done.*
 10. **Probe frames.** Low-resolution render, readback, and a perceptual hash (dHash on luminance) for each probe point.
 
 ---
@@ -383,7 +384,7 @@ Ordered so everything that changes the workload lands before the freeze.
 | Route | What it does |
 | --- | --- |
 | `#/` | Scene library, and Open report for a saved run report (button or file drop) |
-| `#/scene/<id>` | The scene's description and specs, render resolution, light count (Sponza only), Preview, Run benchmark, and a link to the last result |
+| `#/scene/<id>` | The scene's description and specs, render resolution, preview light count (Sponza only), Benchmark or Stress test and its loop count, Preview, Run, and a link to the last result |
 | `#/results` | Score, full-run frame-time chart with hover readout and segment markers, per-segment table, the full run report (readable groups plus the exact upload JSON), Run again, Export JSON, Upload score (hidden for an opened file) |
 
 - The library lists the Orrery first, then Sponza; the catalog order in [simulations.ts](../src/simulations.ts) sets it.
@@ -707,7 +708,7 @@ Merged so far:
 - The Orrery, its throughput benchmark and score, the three-screen UI, graphs and upload (PR #2, Yiding).
 - Google sign-in (PR #3, Charles).
 
-The biggest open measurement gaps are the §3.4 protocol work (repeats, CV, flags) and moving Sponza onto the throughput loop.
+The biggest open measurement gap is the §3.4 protocol work (repeats, CV, flags).
 
 ### Weekly plan
 

@@ -3,6 +3,7 @@ import { GpuContext } from "../gpu/context";
 
 import * as shaders from '../shaders/shaders';
 import { Camera } from "./camera";
+import { maxPointLights } from "../simulations";
 
 const numClusters = shaders.constants.clusterWidth * shaders.constants.clusterHeight * shaders.constants.clusterDepth;
 
@@ -23,7 +24,7 @@ export class Lights {
     private camera: Camera;
 
     numLights = 500;
-    static readonly maxNumLights = 5000;
+    static readonly maxNumLights = maxPointLights;
     static readonly numFloatsPerLight = 8; // vec3f is aligned at 16 byte boundaries
 
     static readonly lightIntensity = 0.1;
@@ -267,10 +268,13 @@ export class Lights {
         });
     }
 
+    // Colors are fixed per light index, so every run lights the scene the same way. Hues step by the golden ratio,
+    // which spreads any number of lights evenly around the color wheel.
     private populateLightsBuffer() {
         for (let lightIdx = 0; lightIdx < Lights.maxNumLights; ++lightIdx) {
             // light pos is set by compute shader so no need to set it here
-            const lightColor = vec3.scale(hueToRgb(Math.random()), Lights.lightIntensity);
+            const hue = (lightIdx * 0.6180339887498949) % 1;
+            const lightColor = vec3.scale(hueToRgb(hue), Lights.lightIntensity);
             this.lightsArray.set(lightColor, (lightIdx * Lights.numFloatsPerLight) + 4);
         }
 
@@ -281,12 +285,14 @@ export class Lights {
         this.gpu.device.queue.writeBuffer(this.lightSetStorageBuffer, 0, new Uint32Array([this.numLights]));
     }
 
-    // Needs this frame's camera uniforms, which the driver writes (camera.onFrame) before encoding the frame
-    doLightClustering(encoder: GPUCommandEncoder) {
+    // Needs this frame's camera uniforms, which the driver writes (camera.onFrame) before encoding the frame.
+    // timestampWrites lets a renderer time from the start of clustering.
+    doLightClustering(encoder: GPUCommandEncoder, timestampWrites?: GPUComputePassTimestampWrites) {
         encoder.clearBuffer(this.clusteringCountersBuffer);
 
         const computePass = encoder.beginComputePass({
-            label: "light clustering compute pass"
+            label: "light clustering compute pass",
+            timestampWrites
         });
         computePass.setBindGroup(0, this.clusteringComputeBindGroup);
 
@@ -327,23 +333,22 @@ export class Lights {
         return { visibleLights, lightIndices, overflowed: overflow != 0 };
     }
 
-    // CHECKITOUT: this is where the light movement compute shader is dispatched from the host
-    onFrame(time: number) {
+    // Moves every light to where it is at `time` (ms). Positions are a pure function of light index and time, so a
+    // benchmark that passes its timeline time gets the same light paths on every run.
+    encodeMove(encoder: GPUCommandEncoder, time: number) {
         this.gpu.device.queue.writeBuffer(this.timeUniformBuffer, 0, new Float32Array([time]));
 
-        // not using same encoder as render pass so this doesn't interfere with measuring actual rendering performance
-        const encoder = this.gpu.device.createCommandEncoder();
-
-        const computePass = encoder.beginComputePass();
+        const computePass = encoder.beginComputePass({ label: "move lights compute pass" });
         computePass.setPipeline(this.moveLightsComputePipeline);
-
         computePass.setBindGroup(0, this.moveLightsComputeBindGroup);
-
-        const workgroupCount = Math.ceil(this.numLights / shaders.constants.moveLightsWorkgroupSize);
-        computePass.dispatchWorkgroups(workgroupCount);
-
+        computePass.dispatchWorkgroups(Math.ceil(this.numLights / shaders.constants.moveLightsWorkgroupSize));
         computePass.end();
+    }
 
+    // Preview: moves the lights in their own submission, ahead of the frame
+    onFrame(time: number) {
+        const encoder = this.gpu.device.createCommandEncoder();
+        this.encodeMove(encoder, time);
         this.gpu.device.queue.submit([encoder.finish()]);
     }
 }

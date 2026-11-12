@@ -71,6 +71,7 @@ export class Camera {
     cameraRight: Vec3 = vec3.create(1, 0, 0);
     yaw: number = 0;
     pitch: number = 0;
+    fovYDegrees: number = fovYDegrees;
     moveSpeed: number = 0.004;
     sensitivity: number = 0.15;
 
@@ -124,7 +125,7 @@ export class Camera {
 
     private updateProjection() {
         const aspectRatio = this.resolution.width / this.resolution.height;
-        this.projMat = mat4.perspective(toRadians(fovYDegrees), aspectRatio, Camera.nearPlane, Camera.farPlane);
+        this.projMat = mat4.perspective(toRadians(this.fovYDegrees), aspectRatio, Camera.nearPlane, Camera.farPlane);
         this.invProjMat = mat4.invert(this.projMat);
         this.projectionVersion++;
     }
@@ -162,6 +163,26 @@ export class Camera {
         this.yaw = yaw;
         this.pitch = pitch;
         this.rotateCamera(0, 0);
+    }
+
+    // A changed field of view rebuilds the projection, and with it the cluster bounds
+    setFieldOfView(degrees: number) {
+        if (degrees === this.fovYDegrees) return;
+        this.fovYDegrees = degrees;
+        this.updateProjection();
+    }
+
+    // Points the camera from `position` at `target`, for scripted camera paths. Free-camera input keeps working from
+    // the new pose.
+    setPose(position: ArrayLike<number>, target: ArrayLike<number>, fovY: number) {
+        this.cameraPos = vec3.create(position[0], position[1], position[2]);
+        const front = vec3.normalize(vec3.sub(vec3.create(target[0], target[1], target[2]), this.cameraPos));
+        this.pitch = Math.asin(Math.max(-1, Math.min(1, front[1]))) * 180 / Math.PI;
+        this.yaw = Math.atan2(front[2], front[0]) * 180 / Math.PI;
+        this.cameraFront = front;
+        this.cameraRight = vec3.normalize(vec3.cross(this.cameraFront, [0, 1, 0]));
+        this.cameraUp = vec3.normalize(vec3.cross(this.cameraRight, this.cameraFront));
+        this.setFieldOfView(fovY);
     }
 
     destroy() {

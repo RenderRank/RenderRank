@@ -96,21 +96,27 @@ test('preview renders with a live graph, closes, and reopens at a different reso
     expect(errors).toEqual([]);
 });
 
-test('Sponza benchmark can be cancelled and restarted, then shows results and exports them', async ({ page }) => {
+test('Sponza benchmark can be cancelled and restarted, then shows a score and exports it', async ({ page }) => {
     await page.goto('/#/scene/sponza');
     await expect(page.locator('#gpu-status')).toContainText('WebGPU ready');
     await page.getByRole('button', { name: 'Run benchmark' }).click();
-    await expect(page.locator('#benchmark-progress')).toContainText('Testing with', { timeout: 30_000 });
+    await expect(page.locator('#benchmark-progress')).toContainText('Shot 1 of 4 · Courtyard', { timeout: 30_000 });
     await page.getByRole('button', { name: 'Back', exact: true }).click();
     await expect(page.locator('#viewer')).toBeHidden();
     await expect(page.locator('#view-scene')).toBeVisible();
     await expect(sceneNav(page, 'Results')).toBeHidden();
     await page.getByRole('button', { name: 'Run benchmark' }).click();
-    await expect(page.locator('#view-results')).toBeVisible({ timeout: 60_000 });
+    // The fixed 40-second camera path, plus loading and warm-up
+    await expect(page.locator('#view-results')).toBeVisible({ timeout: 90_000 });
     await expect(page).toHaveURL(/#\/results$/);
-    await expect(page.locator('#result-rows tr')).toHaveCount(10);
-    await expect(page.locator('#score')).toBeHidden();
+    await expect(page.locator('#result-label')).toHaveText('Shot');
+    await expect(page.locator('#result-rows tr')).toHaveCount(4);
+    await expect(page.locator('#result-rows tr').first().locator('td').first()).toHaveText('Courtyard');
+    await expect(page.locator('#score-label')).toHaveText('SPONZA 1080P SCORE');
+    await expect(page.locator('#score-value')).toHaveText(/^[\d,]+$|^—$/);
     await expect(page.locator('#frame-chart svg')).toBeVisible();
+    // The light count is part of the recorded workload
+    expect(JSON.parse(await page.locator('#report-json').textContent() ?? '').workload.sponzaBenchmarkLights).toBeGreaterThan(0);
     const download = page.waitForEvent('download');
     await page.getByRole('button', { name: 'Export JSON' }).click();
     expect((await download).suggestedFilename()).toMatch(/^renderrank-sponza-1080p-.*\.json$/);
@@ -245,9 +251,9 @@ test('Orrery stress test takes a loop count and can be stopped', async ({ page }
     await page.getByRole('button', { name: 'Back', exact: true }).click();
     await expect(page.locator('#viewer')).toBeHidden();
     await expect(sceneNav(page, 'Results')).toBeHidden();
-    // Sponza's benchmark is display-paced, so it has no stress test
+    // Sponza's benchmark is uncapped too, so it has a stress test; switching scenes resets the choice
     await sceneNav(page, 'Sponza').click();
-    await expect(page.getByLabel('Test', { exact: true })).toBeHidden();
+    await expect(page.getByLabel('Test', { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Run benchmark' })).toBeVisible();
 });
 

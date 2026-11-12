@@ -26,6 +26,13 @@ interface SimulationBase {
     };
 }
 
+// Point lights in Sponza's benchmark. Part of the workload, so it is also listed in the shader constants (and so in
+// every report); changing it makes old results incomparable.
+export const sponzaBenchmarkLights = 8000;
+
+// The preview light slider's top: enough to preview the benchmark's load
+export const maxPointLights = Math.max(5000, sponzaBenchmarkLights);
+
 // Loop counts the stress test accepts, and the stability it needs to pass: the lowest loop score must be at least this
 // fraction of the highest
 export const stressLoopRange = { min: 2, max: 100 };
@@ -72,16 +79,21 @@ export const simulations: Simulation[] = [{
     name: 'Sponza',
     category: 'Architectural scene',
     summary: 'Atrium geometry with moving point lights.',
-    description: 'The Sponza atrium brings together detailed geometry, textured materials, and moving point lights. Adjust the light count to explore how your GPU handles a complex lighting workload.',
+    description: 'The Sponza atrium brings together detailed geometry, textured materials, and moving point lights. The benchmark flies a fixed 40-second camera path through the courtyard, the arcades, and the upper gallery while the lights follow fixed paths, so every run renders the same frames. In preview, fly the camera yourself and change the light count.',
     preview: sponzaPreview,
     previewAlt: 'Stone arches and colored banners in the Sponza atrium',
     renderer: 'Clustered deferred',
     materials: 'Physically based',
-    runNote: 'Benchmark tests 500–5,000 lights at the selected resolution. The light slider applies to preview.',
+    runNote: `Benchmark plays the 40-second camera path once with ${sponzaBenchmarkLights.toLocaleString('en-US')} moving lights, uncapped, and gives a score. The light slider applies only to preview.`,
     previewHelp: 'W A S D to move · Q / E up and down · Hold mouse to look',
-    benchmarkHelp: 'Testing 10 light counts · Keep this tab visible · Back to stop',
-    resultLabel: 'Point lights',
-    resultNote: 'Display-paced frame times are limited by refresh rate. These are diagnostic measurements, not GPU throughput scores.',
+    benchmarkHelp: 'Playing 4 shots · Keep this tab visible · Back to stop',
+    resultLabel: 'Shot',
+    resultNote: 'Frame times are from uncapped offscreen rendering; Min. and Max. are the best and worst quarter-second averages. GPU times, where shown, cover light clustering, the G-buffer, and lighting, and come from browser timestamp queries, which the browser rounds. Scores are not yet ranked against other devices.',
+    stress: {
+        defaultLoops: 20,
+        loopSeconds: 40, // sponzaTimeline's duration in src/stage/sponza_timeline.ts
+        resultNote: 'Each loop plays the whole camera path. A loop’s score is computed as in the benchmark, and its average frame time is the mean of its four shots’ averages; Min. and Max. are the best and worst quarter-second averages in the loop. GPU times, where shown, come from browser timestamp queries.',
+    },
     kind: 'gltf',
     source: `${import.meta.env.BASE_URL}scenes/sponza/Sponza.gltf`,
     camera: { position: [-7, 2, 0], yaw: 0, pitch: 0 },

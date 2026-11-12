@@ -57,8 +57,13 @@ export abstract class Renderer {
         this.camera = stage.camera;
     }
 
-    // Records every pass of one frame into the encoder. The caller submits it.
+    // Records every pass of one frame into the encoder. The caller submits it, then calls afterSubmit().
     abstract encodeFrame(encoder: GPUCommandEncoder): void;
+
+    afterSubmit(): void {}
+
+    // GPU time of the renderer's timed passes in the latest measured frame, when timestamp queries are available
+    get gpuTimeMs(): number | undefined { return undefined; }
 
     // Frees the renderer's GPU targets. It can't render afterwards; frames already submitted still finish.
     abstract destroy(): void;
