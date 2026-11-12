@@ -162,3 +162,16 @@ main > .compatibility { margin: 0 0 24px; }
 .live .live-metrics { margin-left: 0; white-space: nowrap; }
 .live-graph { width: 160px; height: 30px; border: 1px solid var(--line); border-radius: 4px; background: #15161a; }
 @media (max-width: 600px) { .scene-nav.nested { padding-left: 12px; } #nav-library { display: none; } .live-graph { width: 96px; height: 24px; } .result-actions { justify-content: flex-start; } .results-heading { flex-direction: column; } }
+
+/* Account: sign-in panel under the top bar */
+.topbar-end { display: flex; align-items: center; gap: 20px; min-width: 0; }
+.account { position: relative; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.account-email { font-size: 11px; color: #a2a4aa; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sign-in-panel { position: absolute; top: calc(100% + 12px); right: 0; z-index: 20; width: 272px; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: #191a1d; box-shadow: 0 12px 32px rgba(0, 0, 0, .45); }
+.sign-in-panel p { margin: 0; font-size: 12px; color: #c6c7cc; }
+.google-button { display: flex; align-items: center; min-height: 44px; margin-top: 12px; }
+.google-button-loading { font-size: 11px; color: var(--muted); }
+.sign-in-panel .sign-in-status { margin-top: 10px; color: #d7b98e; font-size: 11px; line-height: 1.5; }
+.sign-in-panel .sign-in-status:empty { display: none; }
+@media (max-width: 900px) { .account-email { display: none; } }
+@media (max-width: 600px) { .topbar-end { gap: 10px; } .account .button { min-height: 28px; padding: 5px 9px; font-size: 10px; } .sign-in-panel { width: min(272px, calc(100vw - 32px)); } }
