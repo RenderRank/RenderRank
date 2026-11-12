@@ -2,7 +2,7 @@
 
 **Cross-platform 3D rendering GPU benchmarks in the browser.**
 
-RenderRank runs WebGPU rendering tests in the browser. Select a scene, choose a resolution, preview it, or run its benchmark and export frame-time results as CSV. Sponza runs a light-count sweep; the procedural Orrery plays a fixed 40-second camera path. Ranked scores, saved history, and a public leaderboard are planned.
+RenderRank runs WebGPU rendering tests in the browser. Select a scene, choose a resolution, preview it, or run its benchmark and export frame-time results as CSV. Sponza runs a light-count sweep; the procedural Orrery plays a fixed 40-second camera path. You can sign in with Google. Saved history for signed-in users, ranked scores, and a public leaderboard are planned.
 
 **Live build:** [renderrank.tonyxtian.com](https://renderrank.tonyxtian.com)
 
@@ -109,6 +109,8 @@ npm run dev     # Vite dev server on http://127.0.0.1:5174
 npm run build   # production build to dist/ (the scenes/ folder is copied in too)
 ```
 
+Sign in with Google is off unless `VITE_GOOGLE_CLIENT_ID` is set (see `.env.example`). To sign in locally, put it in `.env.local` and open `http://localhost:5174/`. Creating the client ID is described in [doc/auth.md](doc/auth.md).
+
 The root URL opens the scene library. Scene assets and the renderer load only when Preview or Run benchmark is selected. The device panel shows the GPU model, OS, browser version, and logical core count when the browser exposes them.
 
 To run the browser checks:
@@ -118,7 +120,7 @@ npx playwright install chromium
 npm run test:browser
 ```
 
-Tests start or reuse a local server on port 5175 and require WebGPU. Set `PREVIEW_URL` to test another running server. `npm run build` also checks TypeScript and copies scene assets using the portable Node script in `scripts/`.
+Tests start or reuse a local server on port 5175 and require WebGPU. Sign-in tests use a fake Google script (`tests/fake-google.ts`) and never contact Google. Set `PREVIEW_URL` to test another running server. `npm run build` also checks TypeScript and copies scene assets using the portable Node script in `scripts/`.
 
 Merging into `main` triggers the GitHub Pages deployment. The deployed root also opens the scene library; asset paths support the configured Vite base URL.
 
@@ -127,6 +129,7 @@ Merging into `main` triggers the GitHub Pages deployment. The deployed root also
 ```
 src/
   main.ts           simulation library, controls, viewer, results, and CSV export
+  auth.ts           Sign in with Google (Google Identity Services)
   simulations.ts    scene catalog and render resolutions
   simulation.ts     lazy WebGPU session and renderer lifecycle
   device.ts         browser-reported GPU, system, and browser details

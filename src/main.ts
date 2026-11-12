@@ -6,6 +6,7 @@ import type { BenchmarkResult, BenchmarkScore } from './testing/benchmark';
 import { mountFrameChart, Sparkline } from './ui/frame_chart';
 import type { FrameSample, Segment } from './ui/frame_chart';
 import { constants as shaderConstants } from './shaders/shaders';
+import { accountsEnabled, currentAccount, onAccountChange, renderSignInButton, signOut } from './auth';
 
 const icons = {
     cube: '<path d="m12 3 9 5v8l-9 5-9-5V8zM3 8l9 5 9-5M12 13v8M7.5 5.5l9 5"/>',
@@ -54,7 +55,14 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         </div>
     </aside>
     <div class="workspace">
-        <header class="topbar"><div id="breadcrumb">Simulations</div><span id="gpu-status" class="gpu-status"><span class="status-dot"></span>Checking WebGPU</span></header>
+        <header class="topbar"><div id="breadcrumb">Simulations</div><div class="topbar-end">
+            <div id="account" class="account" hidden>
+                <span id="account-email" class="account-email"></span>
+                <button id="sign-in" class="button secondary compact" aria-expanded="false" aria-controls="sign-in-panel">Sign in</button>
+                <button id="sign-out" class="button secondary compact" hidden>Sign out</button>
+                <div id="sign-in-panel" class="sign-in-panel" role="dialog" aria-label="Sign in" hidden><p>Sign in with your Google account.</p><div id="google-button" class="google-button"></div><p id="sign-in-status" class="sign-in-status" role="status"></p></div>
+            </div>
+            <span id="gpu-status" class="gpu-status"><span class="status-dot"></span>Checking WebGPU</span></div></header>
         <main>
             <div id="compatibility" class="compatibility" role="status" hidden></div>
 
@@ -421,3 +429,55 @@ upload.addEventListener('click', async () => {
 });
 
 showScreen();
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Account
+
+const signInButton = element<HTMLButtonElement>('sign-in');
+const signInPanel = element('sign-in-panel');
+
+function renderAccount(account = currentAccount()) {
+    element('account').hidden = !accountsEnabled;
+    signInButton.hidden = account !== undefined;
+    element('sign-out').hidden = account === undefined;
+    element('account-email').textContent = account?.email ?? '';
+    element('account-email').title = account?.name ?? '';
+    if (account) closeSignIn();
+}
+
+function closeSignIn() {
+    signInPanel.hidden = true;
+    signInButton.setAttribute('aria-expanded', 'false');
+}
+
+// Google's button lives in a small panel, so Google's script loads only for people who choose to sign in
+async function openSignIn() {
+    const status = element('sign-in-status');
+    const slot = element('google-button');
+    signInPanel.hidden = false;
+    signInButton.setAttribute('aria-expanded', 'true');
+    status.textContent = '';
+    // Once drawn, Google's button stays in the panel for the next opening
+    if (slot.querySelector(':not(.google-button-loading)')) return;
+    // The loading note sits in the button's own fixed-height slot, so the button replaces it without resizing the panel
+    slot.hidden = false;
+    slot.innerHTML = '<span class="google-button-loading">Loading Google sign-in…</span>';
+    try {
+        await renderSignInButton(slot, message => { status.textContent = message; });
+    } catch (error) {
+        slot.replaceChildren();
+        slot.hidden = true;
+        status.textContent = (error as Error).message;
+    }
+}
+
+signInButton.addEventListener('click', () => { if (signInPanel.hidden) void openSignIn(); else closeSignIn(); });
+element('sign-out').addEventListener('click', () => { signOut(); signInButton.focus(); });
+document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !signInPanel.hidden) { closeSignIn(); signInButton.focus(); }
+});
+document.addEventListener('click', event => {
+    if (!signInPanel.hidden && !element('account').contains(event.target as Node)) closeSignIn();
+});
+onAccountChange(account => renderAccount(account));
+renderAccount();

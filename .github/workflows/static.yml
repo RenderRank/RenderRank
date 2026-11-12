@@ -40,6 +40,8 @@ jobs:
       - name: Build
         env:
           GITHUB_ACTIONS_BASE: ${{ github.event.repository.name }}
+          # Public OAuth client ID for Sign in with Google (a repository variable). Unset, the site builds without accounts.
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
         run: npm run build
       - name: Setup Pages
         uses: actions/configure-pages@v4

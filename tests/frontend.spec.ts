@@ -1,12 +1,18 @@
 import { expect, test } from '@playwright/test';
+import { fakeGoogle, googleIdToken, testClientId, testEmail } from './fake-google';
 
 const sceneNav = (page: import('@playwright/test').Page, name: string) => page.getByRole('navigation', { name: 'Scenes' }).getByRole('link', { name, exact: true });
 
 test('root opens the library without fetching or starting a scene', async ({ page }, testInfo) => {
     const scenes: string[] = [];
-    page.on('request', request => { if (request.url().includes('/scenes/')) scenes.push(request.url()); });
+    const google: string[] = [];
+    page.on('request', request => {
+        if (request.url().includes('/scenes/')) scenes.push(request.url());
+        if (request.url().startsWith('https://accounts.google.com/')) google.push(request.url());
+    });
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'Simulations', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
     await expect(page.locator('.scene-card')).toHaveCount(2);
     await expect(sceneNav(page, 'Sponza')).toBeVisible();
     await expect(sceneNav(page, 'Results')).toBeHidden();
@@ -19,6 +25,8 @@ test('root opens the library without fetching or starting a scene', async ({ pag
     await expect(page.locator('#device-name')).not.toHaveText('Compatible GPU');
     await expect(page.locator('#viewer')).not.toBeVisible();
     expect(scenes).toEqual([]);
+    // Visitors who don't sign in never contact Google's sign-in service
+    expect(google).toEqual([]);
     await page.screenshot({ path: testInfo.outputPath('library.png'), fullPage: true });
 });
 
@@ -162,4 +170,53 @@ test('Orrery benchmark shows a score and graph, exports, and uploads to the serv
 
     await page.getByRole('link', { name: 'Back to scene' }).click();
     await expect(page.locator('#last-result')).toBeVisible();
+});
+
+test('Sign in with Google shows the account, survives a reload, and signs out', async ({ page }, testInfo) => {
+    const google = await fakeGoogle(page);
+    await page.goto('/#/scene/orrery');
+    const signIn = page.getByRole('button', { name: 'Sign in', exact: true });
+    await signIn.click();
+    await expect(signIn).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByRole('dialog', { name: 'Sign in' })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath('sign-in.png') });
+    await page.getByRole('button', { name: 'Continue with Google' }).click();
+
+    await expect(page.locator('#account-email')).toHaveText(testEmail);
+    await expect(page.getByRole('dialog', { name: 'Sign in' })).toBeHidden();
+    await expect(signIn).toBeHidden();
+    await expect(page).toHaveURL(/#\/scene\/orrery$/);
+    expect(google.scriptLoads).toBe(1);
+    expect(google.initialized[0]).toMatchObject({ client_id: testClientId, ux_mode: 'popup', auto_select: false });
+
+    await page.reload();
+    await expect(page.locator('#account-email')).toHaveText(testEmail);
+    // A remembered sign-in doesn't need Google's script
+    expect(google.scriptLoads).toBe(1);
+
+    await page.getByRole('button', { name: 'Sign out' }).click();
+    await expect(signIn).toBeVisible();
+    await expect(page.locator('#account-email')).toHaveText('');
+    await page.reload();
+    await expect(signIn).toBeVisible();
+});
+
+test('sign-in rejects tokens that are not for this site and closes with Escape', async ({ page }) => {
+    await fakeGoogle(page, googleIdToken({ aud: 'someone-else.apps.googleusercontent.com' }));
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await page.getByRole('button', { name: 'Continue with Google' }).click();
+    await expect(page.locator('#sign-in-status')).toHaveText('The sign-in token is for a different site.');
+    await expect(page.locator('#account-email')).toHaveText('');
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog', { name: 'Sign in' })).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeFocused();
+});
+
+test('sign-in reports when Google can\'t be reached', async ({ page }) => {
+    await page.route('https://accounts.google.com/gsi/client', route => route.abort());
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await expect(page.locator('#sign-in-status')).toContainText('Could not reach Google');
+    await expect(page.locator('.scene-card')).toHaveCount(2);
 });
