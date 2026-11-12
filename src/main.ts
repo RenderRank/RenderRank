@@ -1,27 +1,51 @@
 import { simulations, renderResolutions } from './simulations';
-import { inspectDevice } from './device';
+import type { Simulation } from './simulations';
+import { collectDeviceReport, inspectDevice } from './device';
 import type { SimulationSession } from './simulation';
-import type { BenchmarkResult } from './testing/benchmark';
+import type { BenchmarkResult, BenchmarkScore } from './testing/benchmark';
+import { mountFrameChart, Sparkline } from './ui/frame_chart';
+import type { FrameSample, Segment } from './ui/frame_chart';
+import { constants as shaderConstants } from './shaders/shaders';
 
 const icons = {
     cube: '<path d="m12 3 9 5v8l-9 5-9-5V8zM3 8l9 5 9-5M12 13v8M7.5 5.5l9 5"/>',
     arrow: '<path d="M5 12h14m-6-6 6 6-6 6"/>',
     play: '<path d="m9 5 11 7-11 7z"/>',
     chip: '<rect x="5" y="5" width="14" height="14" rx="3"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 2v3m6-3v3M9 19v3m6-3v3M2 9h3m-3 6h3m14-6h3m-3 6h3"/>',
-    check: '<path d="m5 12 4 4L19 6"/>',
     back: '<path d="M19 12H5m6-6-6 6 6 6"/>',
     download: '<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>',
+    upload: '<path d="M12 15V3m-5 5 5-5 5 5M4 16v5h16v-5"/>',
 };
 function icon(name: keyof typeof icons) {
     return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name]}</svg>`;
 }
 function element<T extends HTMLElement>(id: string) { return document.getElementById(id) as T; }
 
-let selected = simulations[0];
+// A finished benchmark, kept until the next one replaces it
+interface CompletedRun {
+    scene: Simulation;
+    resolution: string;
+    finishedAt: Date;
+    rows: BenchmarkResult[];
+    score?: BenchmarkScore;
+    samples: FrameSample[];
+    segments: Segment[];
+    uploadedId?: string;
+}
+
+// The app is three screens, one visible at a time, chosen by the URL hash:
+//   #/              library: pick a scene
+//   #/scene/<id>    setup: that scene's settings, preview, and run
+//   #/results       results of the last benchmark
+// The viewer dialog sits on top of the setup screen while a scene is running.
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <aside class="sidebar">
-        <a class="brand" href="./" aria-label="RenderRank home"><span class="brand-mark">${icon('cube')}</span>Render<span>Rank</span></a>
-        <nav id="scene-nav" aria-label="Scenes"></nav>
+        <a class="brand" href="#/" aria-label="RenderRank home"><span class="brand-mark">${icon('cube')}</span>Render<span>Rank</span></a>
+        <nav id="scene-nav" aria-label="Scenes">
+            <a class="scene-nav" id="nav-library" href="#/"><span class="scene-nav-dot"></span>All simulations</a>
+            ${simulations.map(scene => `<a class="scene-nav nested" data-scene="${scene.id}" href="#/scene/${scene.id}"><span class="scene-nav-dot"></span>${scene.name}</a>`).join('')}
+            <a class="scene-nav" id="nav-results" href="#/results" hidden><span class="scene-nav-dot"></span>Results</a>
+        </nav>
         <div class="sidebar-bottom">
             <div class="device-icon">${icon('chip')}</div>
             <div class="device-label">YOUR DEVICE</div>
@@ -30,32 +54,54 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         </div>
     </aside>
     <div class="workspace">
-        <header class="topbar"><div>Simulations</div><span id="gpu-status" class="gpu-status"><span class="status-dot"></span>Checking WebGPU</span></header>
-        <main id="simulations">
-            <div class="page-heading"><div><h1>Simulations</h1><p>Select a scene and configure your run.</p></div><span class="scene-count">${String(simulations.length).padStart(2, '0')} <span>AVAILABLE</span></span></div>
-            <div class="simulation-layout">
-                <section aria-label="Available simulations"><div id="scene-cards" class="scene-cards"></div>
-                    <div class="scene-specs"><div><span>GRAPHICS API</span><strong>WebGPU</strong></div><div><span>RENDERER</span><strong>Clustered deferred</strong></div><div><span>MATERIALS</span><strong>Physically based</strong></div></div>
-                </section>
-                <section class="configuration" aria-labelledby="config-title">
-                    <div class="panel-heading"><span class="eyebrow">SELECTED SIMULATION</span><span class="small-dot"></span></div>
-                    <h2 id="config-title">Sponza</h2><p id="scene-type" class="config-subtitle">Architectural scene</p>
-                    <div class="divider"></div>
-                    <label class="field-label" for="resolution">Render resolution</label>
-                    <select id="resolution">${Object.entries(renderResolutions).map(([name, value]) => `<option value="${name}">${name} · ${value.width} × ${value.height}</option>`).join('')}</select>
-                    <div class="light-heading"><label class="field-label" for="lights">Point lights</label><output id="light-value" for="lights">500</output></div>
-                    <input id="lights" type="range" min="1" max="5000" step="1" value="500"><div class="range-labels"><span>1</span><span>5,000</span></div>
-                    <div class="run-actions"><button id="run" class="button primary">${icon('play')}Run benchmark</button><button id="preview" class="button secondary">Preview scene${icon('arrow')}</button></div>
-                    <p class="run-note">Benchmark tests 500–5,000 lights at the selected resolution. The light slider applies to preview.</p>
-                    <div id="compatibility" class="compatibility" role="status" hidden></div>
-                </section>
-            </div>
-            <section class="scene-information" aria-labelledby="about-heading"><div><span class="eyebrow">ABOUT THE SCENE</span><h2 id="about-heading">Sponza atrium</h2></div><p id="scene-description"></p></section>
-            <section id="results" class="results" aria-labelledby="results-heading" hidden><div class="results-heading"><div><span class="eyebrow">LAST RUN</span><h2 id="results-heading">Sponza results</h2></div><button id="download" class="button secondary compact">${icon('download')}Export CSV</button></div><p id="result-settings" class="result-settings"></p><div class="table-scroll"><table><thead><tr><th>Point lights</th><th>Avg. frame time</th><th>Min.</th><th>Max.</th></tr></thead><tbody id="result-rows"></tbody></table></div><p class="run-note">Display-paced frame times are limited by refresh rate. These are diagnostic measurements, not GPU throughput scores.</p></section>
+        <header class="topbar"><div id="breadcrumb">Simulations</div><span id="gpu-status" class="gpu-status"><span class="status-dot"></span>Checking WebGPU</span></header>
+        <main>
+            <div id="compatibility" class="compatibility" role="status" hidden></div>
+
+            <section id="view-library" aria-labelledby="library-heading">
+                <div class="page-heading"><div><h1 id="library-heading">Simulations</h1><p>Choose a scene to set up a run.</p></div><span class="scene-count">${String(simulations.length).padStart(2, '0')} <span>AVAILABLE</span></span></div>
+                <div class="scene-cards">${simulations.map((scene, i) => `<a class="scene-card" data-scene="${scene.id}" href="#/scene/${scene.id}"><div class="scene-image"><img src="${scene.preview}" alt="${scene.previewAlt}"><span class="scene-number">SCENE ${String(i + 1).padStart(2, '0')}</span></div><div class="scene-card-body"><div><span class="eyebrow">${scene.category}</span><h2>${scene.name}</h2><p>${scene.summary}</p></div><span class="scene-card-arrow">${icon('arrow')}</span></div></a>`).join('')}</div>
+            </section>
+
+            <section id="view-scene" aria-labelledby="scene-heading" hidden>
+                <a class="back-link" href="#/">${icon('back')}All simulations</a>
+                <div class="page-heading"><div><h1 id="scene-heading"></h1><p id="scene-type"></p></div></div>
+                <div class="simulation-layout">
+                    <div>
+                        <div class="scene-image framed"><img id="scene-image" alt=""></div>
+                        <div class="scene-specs"><div><span>GRAPHICS API</span><strong>WebGPU</strong></div><div><span>RENDERER</span><strong id="spec-renderer"></strong></div><div><span>MATERIALS</span><strong id="spec-materials"></strong></div></div>
+                        <p id="scene-description" class="scene-description"></p>
+                    </div>
+                    <section class="configuration" aria-labelledby="config-title">
+                        <span class="eyebrow" id="config-title">RUN SETTINGS</span>
+                        <label class="field-label first" for="resolution">Render resolution</label>
+                        <select id="resolution">${Object.entries(renderResolutions).map(([name, value]) => `<option value="${name}">${name} · ${value.width} × ${value.height}</option>`).join('')}</select>
+                        <div id="light-settings"><div class="light-heading"><label class="field-label" for="lights">Point lights</label><output id="light-value" for="lights">500</output></div>
+                        <input id="lights" type="range" min="1" max="5000" step="1" value="500"><div class="range-labels"><span>1</span><span>5,000</span></div></div>
+                        <div class="run-actions"><button id="run" class="button primary">${icon('play')}Run benchmark</button><button id="preview" class="button secondary">Preview scene${icon('arrow')}</button></div>
+                        <p id="run-note" class="run-note"></p>
+                        <a id="last-result" class="last-result" href="#/results" hidden>View last result${icon('arrow')}</a>
+                    </section>
+                </div>
+            </section>
+
+            <section id="view-results" aria-labelledby="results-heading" hidden>
+                <a class="back-link" id="results-back" href="#/">${icon('back')}Back to scene</a>
+                <div class="results-heading"><div><h1 id="results-heading">Results</h1><p id="result-settings" class="result-settings"></p></div>
+                    <div class="result-actions"><button id="run-again" class="button secondary compact">${icon('play')}Run again</button><button id="download" class="button secondary compact">${icon('download')}Export CSV</button><button id="upload" class="button primary compact">${icon('upload')}<span>Upload score</span></button></div></div>
+                <p id="upload-status" class="upload-status" role="status" hidden></p>
+                <div id="score" class="score" hidden><span class="eyebrow" id="score-label">SCORE</span><strong id="score-value"></strong><span id="score-detail"></span><p id="score-note" class="run-note"></p></div>
+                <h2 class="section-title">Frame time over the run</h2>
+                <div id="frame-chart" class="frame-chart"></div>
+                <h2 class="section-title" id="table-title">By segment</h2>
+                <div class="table-scroll"><table><thead><tr><th id="result-label">Point lights</th><th>Avg. frame time</th><th>Min.</th><th>Max.</th><th id="result-gpu" hidden>Avg. GPU pass</th></tr></thead><tbody id="result-rows"></tbody></table></div>
+                <p id="result-note" class="run-note"></p>
+            </section>
+
             <footer><span>RenderRank</span><span>Browser-based GPU benchmarking</span></footer>
         </main>
     </div>
-    <dialog id="viewer" aria-labelledby="viewer-title"><div class="viewer-shell"><div class="viewer-toolbar"><button id="close-viewer" class="button secondary compact">${icon('back')}Back</button><div class="viewer-title"><strong id="viewer-title">Sponza</strong><span id="viewer-mode">Preview</span></div><span id="live-metrics" class="live-metrics"></span></div><div class="canvas-wrap"><canvas id="mainCanvas" tabindex="0" aria-label="Interactive Sponza scene"></canvas><div id="loading" class="loading" role="status"><span class="spinner"></span><span id="loading-message">Loading Sponza…</span></div></div><div class="viewer-footer"><span id="viewer-help">W A S D to move · Q / E up and down · Hold mouse to look</span><span id="benchmark-progress" role="status"></span></div></div></dialog>
+    <dialog id="viewer" aria-labelledby="viewer-title"><div class="viewer-shell"><div class="viewer-toolbar"><button id="close-viewer" class="button secondary compact">${icon('back')}Back</button><div class="viewer-title"><strong id="viewer-title"></strong><span id="viewer-mode">Preview</span></div><div class="live"><canvas id="live-graph" class="live-graph" role="img" aria-label="Recent frame times"></canvas><span id="live-metrics" class="live-metrics"></span></div></div><div class="canvas-wrap"><canvas id="mainCanvas" tabindex="0"></canvas><div id="loading" class="loading" role="status"><span class="spinner"></span><span id="loading-message"></span></div></div><div class="viewer-footer"><span id="viewer-help"></span><span id="benchmark-progress" role="status"></span></div></div></dialog>
 `;
 
 const run = element<HTMLButtonElement>('run');
@@ -64,37 +110,71 @@ const resolution = element<HTMLSelectElement>('resolution');
 const lights = element<HTMLInputElement>('lights');
 const viewer = element<HTMLDialogElement>('viewer');
 const canvas = element<HTMLCanvasElement>('mainCanvas');
+const upload = element<HTMLButtonElement>('upload');
+const uploadLabel = upload.querySelector('span')!;
+const sparkline = new Sparkline(element<HTMLCanvasElement>('live-graph'));
+
+let selected = simulations[0];
 let session: SimulationSession | undefined;
 let initializing: Promise<SimulationSession> | undefined;
 let controller: AbortController | undefined;
 let busy = false;
 let failed = false;
-let results: BenchmarkResult[] = [];
-let resultResolution = '';
-let resultScene = selected;
+let adapter: GPUAdapter | undefined;
+let lastRun: CompletedRun | undefined;
+let unmountChart: (() => void) | undefined;
 
-function selectSimulation(id: string) {
-    if (busy) return;
-    if (selected.id !== id) {
+// ---------------------------------------------------------------------------------------------------------------------
+// Screens
+
+function selectSimulation(scene: Simulation) {
+    if (selected.id !== scene.id) {
         session?.destroy();
         session = undefined;
         initializing = undefined;
     }
-    selected = simulations.find(scene => scene.id === id)!;
-    element('config-title').textContent = selected.name;
-    element('scene-type').textContent = selected.category;
-    element('scene-description').textContent = selected.description;
-    element('about-heading').textContent = selected.name;
-    document.querySelectorAll<HTMLButtonElement>('[data-scene]').forEach(button => {
-        const active = button.dataset.scene === id;
-        button.setAttribute('aria-pressed', String(active));
-        button.classList.toggle('selected', active);
-    });
+    selected = scene;
+    element('scene-heading').textContent = scene.name;
+    element('scene-type').textContent = `${scene.category} · ${scene.summary}`;
+    element('scene-description').textContent = scene.description;
+    element('spec-renderer').textContent = scene.renderer;
+    element('spec-materials').textContent = scene.materials;
+    element('run-note').textContent = scene.runNote;
+    element('light-settings').hidden = scene.kind !== 'gltf';
+    const image = element<HTMLImageElement>('scene-image');
+    image.src = scene.preview;
+    image.alt = scene.previewAlt;
+    element('last-result').hidden = lastRun?.scene.id !== scene.id;
 }
-element('scene-cards').innerHTML = simulations.map(scene => `<button class="scene-card" data-scene="${scene.id}" aria-pressed="true"><div class="scene-image"><img src="${scene.preview}" alt="${scene.previewAlt}"><span class="scene-number">SCENE ${String(simulations.indexOf(scene) + 1).padStart(2, '0')}</span><span class="selection-indicator">${icon('check')}Selected</span></div><div class="scene-card-body"><div><span class="eyebrow">${scene.category}</span><h2>${scene.name}</h2><p>${scene.summary}</p></div><span class="scene-card-arrow">${icon('arrow')}</span></div></button>`).join('');
-element('scene-nav').innerHTML = simulations.map(scene => `<button class="scene-nav" data-scene="${scene.id}" aria-pressed="true"><span class="scene-nav-dot"></span>${scene.name}</button>`).join('');
-document.querySelectorAll<HTMLButtonElement>('[data-scene]').forEach(button => button.addEventListener('click', () => selectSimulation(button.dataset.scene!)));
-selectSimulation(selected.id);
+
+function showScreen() {
+    const [, view, id] = location.hash.split('/');
+    const scene = simulations.find(candidate => candidate.id === id);
+    const screen = view === 'scene' && scene ? 'scene' : view === 'results' && lastRun ? 'results' : 'library';
+
+    // A different scene can't take over while one is running
+    if (screen === 'scene' && !busy) selectSimulation(scene!);
+
+    element('view-library').hidden = screen !== 'library';
+    element('view-scene').hidden = screen !== 'scene';
+    element('view-results').hidden = screen !== 'results';
+    element('breadcrumb').textContent = screen === 'library' ? 'Simulations'
+        : screen === 'scene' ? `Simulations / ${selected.name}`
+        : `Simulations / ${lastRun!.scene.name} / Results`;
+
+    element('nav-library').classList.toggle('selected', screen === 'library');
+    element('nav-results').classList.toggle('selected', screen === 'results');
+    document.querySelectorAll<HTMLElement>('.scene-nav[data-scene]').forEach(link => {
+        const active = screen === 'scene' && link.dataset.scene === selected.id;
+        link.classList.toggle('selected', active);
+        if (active) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current');
+    });
+
+    if (screen === 'results') renderResults();
+    window.scrollTo(0, 0);
+}
+window.addEventListener('hashchange', showScreen);
+
 lights.addEventListener('input', () => {
     element('light-value').textContent = Number(lights.value).toLocaleString();
     lights.style.setProperty('--range-progress', `${(Number(lights.value) - 1) / 4999 * 100}%`);
@@ -105,8 +185,9 @@ function showCompatibility(message: string) {
     notice.textContent = message;
     notice.hidden = false;
 }
+
 async function checkGpu() {
-    function displayDevice(adapter?: GPUAdapter) {
+    function displayDevice() {
         const device = inspectDevice(adapter);
         element('device-name').textContent = device.gpu;
         element('device-system').textContent = device.system;
@@ -115,9 +196,9 @@ async function checkGpu() {
     }
     try {
         if (!navigator.gpu) throw new Error('WebGPU is unavailable. Open this page in a WebGPU-compatible browser such as Chrome or Edge.');
-        const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+        adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' }) ?? undefined;
         if (!adapter) throw new Error('No compatible GPU was found. Check that hardware acceleration is enabled in your browser.');
-        displayDevice(adapter);
+        displayDevice();
         element('gpu-status').innerHTML = '<span class="status-dot ready"></span>WebGPU ready';
     } catch (error) {
         displayDevice();
@@ -128,21 +209,33 @@ async function checkGpu() {
 }
 void checkGpu();
 
+// ---------------------------------------------------------------------------------------------------------------------
+// Running a scene
+
+// Turns a benchmark progress message into the label of the segment it starts, if it starts one
+function segmentLabel(message: string): string | undefined {
+    return message.match(/^Testing with (\d+) lights/)?.[1].replace(/\B(?=(\d{3})+$)/g, ',')
+        ?? message.match(/^Shot \d+ of \d+ · (.+)$/)?.[1];
+}
+
 async function openSimulation(benchmark: boolean) {
     if (busy || failed) return;
     busy = true;
     controller = new AbortController();
     const signal = controller.signal;
+    const scene = selected;
     viewer.showModal();
-    element('viewer-title').textContent = selected.name;
+    element('viewer-title').textContent = scene.name;
     element('viewer-mode').textContent = benchmark ? 'Benchmark' : 'Preview';
     element('benchmark-progress').textContent = '';
     element('live-metrics').textContent = '';
     element('loading').hidden = false;
-    element('loading-message').textContent = `Loading ${selected.name}…`;
-    element('viewer-help').textContent = benchmark ? 'Testing 10 light counts · Keep this tab visible · Back to stop' : 'W A S D to move · Q / E up and down · Hold mouse to look';
+    element('loading-message').textContent = `Loading ${scene.name}…`;
+    element('viewer-help').textContent = benchmark ? scene.benchmarkHelp : scene.previewHelp;
+    canvas.setAttribute('aria-label', `${scene.name} scene`);
+    sparkline.clear();
     try {
-        initializing ??= import('./simulation').then(module => module.createSimulation(canvas, selected, message => {
+        initializing ??= import('./simulation').then(module => module.createSimulation(canvas, scene, message => {
             failed = true;
             controller?.abort();
             session?.stop();
@@ -154,9 +247,19 @@ async function openSimulation(benchmark: boolean) {
         session = await initializing;
         if (signal.aborted) return;
         session.configure(resolution.value, Number(lights.value));
-        session.setMetricsCallback((fps, frameTime) => {
-            element('live-metrics').textContent = `${fps.toFixed(0)} FPS  /  ${frameTime.toFixed(1)} ms`;
+        session.setMetricsCallback((fps, frameTime, gpuTime) => {
+            element('live-metrics').textContent = `${fps.toFixed(0)} FPS  /  ${frameTime.toFixed(1)} ms` + (gpuTime === undefined ? '' : `  ·  GPU ${gpuTime.toFixed(1)} ms`);
         });
+
+        // Every sample feeds the live graph; during a benchmark they are also kept for the results screen
+        const samples: FrameSample[] = [];
+        const segments: Segment[] = [];
+        let runStart: number | undefined;
+        session.setSampleCallback(frameTime => {
+            sparkline.push(frameTime);
+            if (runStart !== undefined) samples.push({ tMs: performance.now() - runStart, frameTimeMs: frameTime });
+        });
+
         element('loading').hidden = true;
         session.start(!benchmark);
         canvas.focus();
@@ -164,17 +267,18 @@ async function openSimulation(benchmark: boolean) {
             const runResolution = resolution.value;
             const captured = await session.benchmark(signal, message => {
                 element('benchmark-progress').textContent = message;
+                const label = segmentLabel(message);
+                if (label !== undefined) {
+                    // The clock starts with the first segment, so warm-up isn't part of the graph
+                    runStart ??= performance.now();
+                    segments.push({ tMs: performance.now() - runStart, label });
+                }
             });
             if (signal.aborted) return;
-            results = captured;
-            resultScene = selected;
-            resultResolution = runResolution;
-            element('results-heading').textContent = `${resultScene.name} results`;
-            element('result-rows').innerHTML = results.map(row => `<tr><td>${row.numLights.toLocaleString()}</td><td>${row.avgFrameTimeMs.toFixed(2)} <span>ms</span></td><td>${row.minFrameTimeMs.toFixed(2)} <span>ms</span></td><td>${row.maxFrameTimeMs.toFixed(2)} <span>ms</span></td></tr>`).join('');
-            element('result-settings').textContent = `${selected.name} · ${resultResolution} · Clustered deferred · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-            element('results').hidden = false;
+            lastRun = { scene, resolution: runResolution, finishedAt: new Date(), rows: captured.rows, score: captured.score, samples, segments };
+            element('nav-results').hidden = false;
             closeViewer();
-            element('results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            if (location.hash === '#/results') showScreen(); else location.hash = '#/results';
         }
     } catch (error) {
         if (!signal.aborted) {
@@ -186,9 +290,11 @@ async function openSimulation(benchmark: boolean) {
         if (!viewer.open) busy = false;
     }
 }
+
 function closeViewer() {
     controller?.abort();
     session?.stop();
+    session?.setSampleCallback(null);
     if (document.pointerLockElement === canvas) document.exitPointerLock();
     viewer.close();
     if (session && !session.isBenchmarkRunning()) busy = false;
@@ -197,12 +303,121 @@ run.addEventListener('click', () => void openSimulation(true));
 preview.addEventListener('click', () => void openSimulation(false));
 element('close-viewer').addEventListener('click', closeViewer);
 viewer.addEventListener('cancel', event => { event.preventDefault(); closeViewer(); });
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Results
+
+function renderResults() {
+    const result = lastRun!;
+    element<HTMLAnchorElement>('results-back').href = `#/scene/${result.scene.id}`;
+    element('results-heading').textContent = `${result.scene.name} results`;
+    element('result-settings').textContent = `${result.resolution} · ${result.scene.renderer} · ${result.finishedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+
+    element('score').hidden = !result.score;
+    if (result.score) {
+        element('score-label').textContent = `${result.scene.name.toUpperCase()} ${result.resolution.toUpperCase()} SCORE`;
+        element('score-value').textContent = result.score.valid ? result.score.value.toLocaleString() : '—';
+        element('score-detail').textContent = result.score.valid ? `${result.score.averageFps.toFixed(1)} FPS average across shots` : '';
+        element('score-note').textContent = result.score.note;
+    }
+
+    unmountChart?.();
+    unmountChart = mountFrameChart(element('frame-chart'), result.samples, result.segments);
+
+    const hasGpuTimes = result.rows.some(row => row.avgGpuTimeMs !== undefined);
+    const ms = (value: number) => Number.isFinite(value) ? `${value.toFixed(2)} <span>ms</span>` : '—';
+    element('table-title').textContent = `By ${result.scene.resultLabel.toLowerCase()}`;
+    element('result-label').textContent = result.scene.resultLabel;
+    element('result-gpu').hidden = !hasGpuTimes;
+    element('result-rows').innerHTML = result.rows.map(row => `<tr><td>${row.label}</td><td>${ms(row.avgFrameTimeMs)}</td><td>${ms(row.minFrameTimeMs)}</td><td>${ms(row.maxFrameTimeMs)}</td>${hasGpuTimes ? `<td>${ms(row.avgGpuTimeMs ?? NaN)}</td>` : ''}</tr>`).join('');
+    element('result-note').textContent = result.scene.resultNote;
+
+    upload.disabled = result.uploadedId !== undefined;
+    uploadLabel.textContent = result.uploadedId ? 'Uploaded' : 'Upload score';
+    const status = element('upload-status');
+    status.hidden = !result.uploadedId;
+    status.textContent = result.uploadedId ? `Saved on the server as ${result.uploadedId}` : '';
+}
+
+element('run-again').addEventListener('click', () => {
+    if (!lastRun || busy) return;
+    resolution.value = lastRun.resolution;
+    location.hash = `#/scene/${lastRun.scene.id}`;
+    // The hash change selects the scene; start once that has happened
+    setTimeout(() => void openSimulation(true));
+});
+
 element('download').addEventListener('click', () => {
-    const csv = ['Scene,Resolution,Number of Lights,Average Frame Time (ms),Min Frame Time (ms),Max Frame Time (ms)', ...results.map(row => `${resultScene.name},${resultResolution},${row.numLights},${row.avgFrameTimeMs.toFixed(3)},${row.minFrameTimeMs.toFixed(3)},${row.maxFrameTimeMs.toFixed(3)}`)].join('\n');
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+    if (!lastRun) return;
+    const { scene, resolution: runResolution, rows, score } = lastRun;
+    const firstColumn = scene.kind === 'gltf' ? 'Number of Lights' : scene.resultLabel;
+    const number = (value: number | undefined) => value === undefined || !Number.isFinite(value) ? '' : value.toFixed(3);
+    const lines = [`Scene,Resolution,${firstColumn},Average Frame Time (ms),Min Frame Time (ms),Max Frame Time (ms),Average GPU Pass Time (ms),Score`,
+        ...rows.map(row => `${scene.name},${runResolution},${row.numLights ?? row.label},${number(row.avgFrameTimeMs)},${number(row.minFrameTimeMs)},${number(row.maxFrameTimeMs)},${number(row.avgGpuTimeMs)},`)];
+    if (score) {
+        lines.push(`${scene.name},${runResolution},Overall,${number(1000 / score.averageFps)},,,,${score.valid ? score.value : 'invalid'}`);
+    }
+    const url = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' }));
     const link = document.createElement('a');
     link.href = url;
-    link.download = `renderrank-${resultScene.id}-${resultResolution}-${Date.now()}.csv`;
+    link.download = `renderrank-${scene.id}-${runResolution}-${Date.now()}.csv`;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
+
+// Sends the whole run, with everything the browser reveals about the device, to this site's server
+upload.addEventListener('click', async () => {
+    const result = lastRun;
+    if (!result || result.uploadedId) return;
+    const status = element('upload-status');
+    upload.disabled = true;
+    uploadLabel.textContent = 'Uploading…';
+    status.hidden = true;
+    try {
+        const finite = (value: number | undefined) => value !== undefined && Number.isFinite(value) ? Number(value.toFixed(4)) : null;
+        const body = {
+            schemaVersion: 1,
+            finishedAt: result.finishedAt.toISOString(),
+            page: location.origin + location.pathname,
+            scene: { id: result.scene.id, name: result.scene.name, kind: result.scene.kind, renderer: result.scene.renderer },
+            settings: { resolution: result.resolution, ...renderResolutions[result.resolution] },
+            // The constants that define the workload, so results from different versions can be told apart
+            workload: shaderConstants,
+            score: result.score ?? null,
+            rows: result.rows.map(row => ({
+                label: row.label,
+                numLights: row.numLights ?? null,
+                avgFrameTimeMs: finite(row.avgFrameTimeMs),
+                minFrameTimeMs: finite(row.minFrameTimeMs),
+                maxFrameTimeMs: finite(row.maxFrameTimeMs),
+                avgGpuTimeMs: finite(row.avgGpuTimeMs),
+            })),
+            segments: result.segments.map(segment => ({ tMs: Math.round(segment.tMs), label: segment.label })),
+            // Parallel arrays keep the frame-time series compact
+            frameTimes: {
+                tMs: result.samples.map(sample => Math.round(sample.tMs)),
+                frameTimeMs: result.samples.map(sample => Number(sample.frameTimeMs.toFixed(3))),
+            },
+            device: await collectDeviceReport(adapter),
+        };
+        const response = await fetch(`${import.meta.env.BASE_URL}api/results`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        const reply = await response.json().catch(() => undefined) as { id?: string; error?: string } | undefined;
+        if (!response.ok || !reply?.id) {
+            throw new Error(reply?.error ?? (response.status === 404 || response.status === 405 ? 'This site has no result storage.' : `The server answered ${response.status}.`));
+        }
+        result.uploadedId = reply.id;
+    } catch (error) {
+        status.textContent = `Upload failed. ${(error as Error).message}`;
+        status.hidden = false;
+        upload.disabled = false;
+        uploadLabel.textContent = 'Upload score';
+        return;
+    }
+    if (lastRun === result && !element('view-results').hidden) renderResults();
+});
+
+showScreen();

@@ -12,6 +12,7 @@ export class DisplayDriver {
     private prevTime: number = 0;
     private frameRequestId: number = 0;
     private frameTimeCallback: ((frameTime: number) => void) | null = null;
+    private frameObserver: ((frameTime: number) => void) | null = null;
 
     constructor(stage: Stage, renderer: Renderer) {
         this.stage = stage;
@@ -40,6 +41,11 @@ export class DisplayDriver {
         this.frameTimeCallback = callback;
     }
 
+    // Like the frame time callback, but separate so a graph can watch frames while a benchmark owns the callback
+    setFrameObserver(observer: ((frameTime: number) => void) | null) {
+        this.frameObserver = observer;
+    }
+
     private onFrame(time: number) {
         const isFirstFrame = this.prevTime == 0;
         if (isFirstFrame) {
@@ -62,6 +68,9 @@ export class DisplayDriver {
 
         if (this.frameTimeCallback && !isFirstFrame) {
             this.frameTimeCallback(frameTime);
+        }
+        if (this.frameObserver && !isFirstFrame) {
+            this.frameObserver(frameTime);
         }
 
         this.prevTime = time;

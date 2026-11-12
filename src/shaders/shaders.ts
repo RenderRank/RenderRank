@@ -11,6 +11,8 @@ import clusteredDeferredFullscreenFragRaw from './clustered_deferred_fullscreen.
 
 import tonemapFragRaw from './tonemap.fs.wgsl?raw';
 
+import orreryFragRaw from './orrery.fs.wgsl?raw';
+
 import moveLightsComputeRaw from './move_lights.cs.wgsl?raw';
 import clusterBoundsComputeRaw from './cluster_bounds.cs.wgsl?raw';
 import lightCullingComputeRaw from './light_culling.cs.wgsl?raw';
@@ -43,7 +45,18 @@ export const constants = {
     maxClusterLightIndices: 1 << 21,
 
     // Scales HDR lighting before the tone curve. Tuned by eye for Sponza at the current light intensity.
-    toneMappingExposure: 1.7
+    toneMappingExposure: 1.7,
+
+    // Orrery ray-march step caps. Together they set the scene's per-pixel cost, so changing any of them changes the
+    // workload and makes old results incomparable.
+    orreryPrimarySteps: 160,
+    orrerySunShadowSteps: 48,
+    orreryCoreShadowSteps: 72,
+    orreryAoSamples: 6,
+    orreryReflectionSteps: 96,
+    orreryReflectionShadowSteps: 24,
+    orreryVolumeSamples: 20,
+    orreryVolumeShadowSteps: 20
 };
 
 // =================================
@@ -68,6 +81,9 @@ export const clusteredDeferredFragSrc: string = processShaderRaw(clusteredDeferr
 export const clusteredDeferredFullscreenFragSrc: string = processShaderRaw(clusteredDeferredFullscreenFragRaw);
 
 export const tonemapFragSrc: string = processShaderRaw(tonemapFragRaw);
+
+// Self-contained: it doesn't use the clustered renderer's common code
+export const orreryFragSrc: string = evalShaderRaw(orreryFragRaw);
 
 export const moveLightsComputeSrc: string = processShaderRaw(moveLightsComputeRaw);
 export const clusterBoundsComputeSrc: string = processShaderRaw(clusterBoundsComputeRaw);

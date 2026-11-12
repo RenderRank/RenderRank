@@ -7,21 +7,31 @@ import { Lights } from './stage/lights';
 import { Camera } from './stage/camera';
 import { Stage } from './stage/stage';
 import { BenchmarkRunner } from './testing/benchmark';
-import type { BenchmarkResult } from './testing/benchmark';
+import type { BenchmarkResult, BenchmarkRun } from './testing/benchmark';
 import { renderResolutions } from './simulations';
-import type { Simulation } from './simulations';
+import type { GltfSimulation, Simulation } from './simulations';
 
 export interface SimulationSession {
     configure(resolution: string, lights: number): void;
     start(interactive: boolean): void;
     stop(): void;
     destroy(): void;
-    setMetricsCallback(callback: (fps: number, frameTime: number) => void): void;
-    benchmark(signal: AbortSignal, progress: (message: string) => void): Promise<BenchmarkResult[]>;
+    setMetricsCallback(callback: (fps: number, frameTime: number, gpuTime?: number) => void): void;
+    // Frame times in ms as they happen, for graphs. One call per frame, or per short window when frames aren't
+    // display-paced.
+    setSampleCallback(callback: ((frameTime: number) => void) | null): void;
+    benchmark(signal: AbortSignal, progress: (message: string) => void): Promise<BenchmarkRun>;
     isBenchmarkRunning(): boolean;
 }
 
 export async function createSimulation(canvas: HTMLCanvasElement, simulation: Simulation, onLost: (message: string) => void): Promise<SimulationSession> {
+    if (simulation.kind === 'procedural') {
+        return (await import('./procedural/orrery_session')).createOrrerySession(canvas, onLost);
+    }
+    return createGltfSimulation(canvas, simulation, onLost);
+}
+
+async function createGltfSimulation(canvas: HTMLCanvasElement, simulation: GltfSimulation, onLost: (message: string) => void): Promise<SimulationSession> {
     const gpu = await GpuContext.create(canvas);
     let driver: DisplayDriver | undefined;
     gpu.lost.then(info => {
@@ -50,7 +60,9 @@ export async function createSimulation(canvas: HTMLCanvasElement, simulation: Si
                 elapsed = frames = 0;
             }
         };
-        display.setFrameTimeCallback(reportFrame);
+        // An observer rather than the frame-time callback, which the benchmark runner takes over while it runs
+        let sample: ((frameTime: number) => void) | null = null;
+        display.setFrameObserver(frameTime => { reportFrame(frameTime); sample?.(frameTime); });
         return {
             configure(name, count) {
                 const resolution = renderResolutions[name];
@@ -75,12 +87,13 @@ export async function createSimulation(canvas: HTMLCanvasElement, simulation: Si
             stop() { camera.inputEnabled = false; camera.keys = {}; display.stop(); },
             destroy() { display.stop(); camera.destroy(); renderer.destroy(); gpu.destroy(); },
             setMetricsCallback(callback) { metrics = callback; },
+            setSampleCallback(callback) { sample = callback; },
             async benchmark(signal, progress) {
                 let captured: BenchmarkResult[] = [];
                 runner.setProgressCallback(progress);
                 runner.setCompleteCallback(results => { captured = results; });
-                try { await runner.runBenchmark(signal); return captured; }
-                finally { display.setFrameTimeCallback(reportFrame); }
+                await runner.runBenchmark(signal);
+                return { rows: captured };
             },
             isBenchmarkRunning() { return runner.isTestRunning(); },
         };

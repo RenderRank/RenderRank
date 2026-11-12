@@ -4,6 +4,7 @@
 
 - Never push to `main` without the user's explicit permission. Keep frontend work on a feature branch.
 - The root URL must open the simulation library. Load the renderer and scene assets only after Preview or Run benchmark is selected.
+- The app has three screens chosen by the URL hash: `#/` (library), `#/scene/<id>` (setup, preview, run), and `#/results` (last run). Keep each screen to its one job.
 - Keep the UI minimal: real scenes, real device information, functional controls, no placeholder scenes or invented scores.
 - Respect existing changes and untracked assets in the working tree.
 
@@ -35,6 +36,16 @@ The scene catalog lives in `src/simulations.ts`. The landing-page cards, scene n
 4. Verify the starting camera in Preview. Coordinates are in the scene's world space; yaw/pitch are degrees. `src/simulation.ts` restores this camera at the start of each preview/run. Check scale, clipping, and lighting rather than copying Sponza's coordinates.
 5. Test switching between the new scene and Sponza after previewing and benchmarking. Selection disposes the previous GPU session; `src/simulation.ts` creates the selected scene with its catalog URL. Keep this behavior when adding new renderer types.
 
+## Procedural scenes
+
+A catalog entry with `kind: 'procedural'` has no glTF source or free camera. `src/simulation.ts` hands it to its own session (`src/procedural/orrery_session.ts`), which drives a fixed camera timeline instead of the light sweep.
+
+- The Orrery's geometry and materials live in `src/shaders/orrery.fs.wgsl`; camera shots and mechanism animation live in `src/procedural/orrery_timeline.ts`. Ring radii and the orrery center appear in both and must match.
+- The `orrery*` step caps in `src/shaders/shaders.ts` set the per-pixel cost. Changing them, the shader, or the timeline changes the workload, so earlier results stop being comparable.
+- Keep the camera path clear of geometry: a camera inside a surface renders garbage. Orbiting planets sit at radii 5.2–7.0.
+- Its benchmark runs a throughput loop (`runThroughput` in `orrery_session.ts`): frames render offscreen back to back, at most two in flight, and the canvas gets a copy only when the display asks. It reports frame times per shot, the ray-march pass's GPU time when timestamp queries are available, and a score (100 × the harmonic mean of the shots' frame rates). A run is marked not valid if the tab was hidden. Preview stays display-paced.
+- Scores compare only at the same resolution and workload. There is no leaderboard yet, so don't call them ranked.
+
 ## Loader and lighting limitations
 
 Registering a URL does not guarantee that an arbitrary glTF will render correctly. Inspect these assumptions before introducing a different asset:
@@ -43,13 +54,16 @@ Registering a URL does not guarantee that an arbitrary glTF will render correctl
 - The renderer supports metallic-roughness PBR and normal maps. Alpha blending is treated as cutout in the deferred G-buffer; scenes requiring true transparency need renderer work.
 - Point-light movement is defined in `src/shaders/move_lights.cs.wgsl` and is currently sized/positioned for Sponza. New geometry may need a scene-specific light volume or effect configuration. Add explicit catalog settings and wire them through the runtime instead of silently changing Sponza's workload globally.
 - The common camera projection is defined by `src/renderer.ts` and `src/stage/camera.ts`. Assets with very different dimensions may need explicit projection settings.
-- The current benchmark sweeps 500 to 5,000 lights, with 30 warmup frames and 120 measured frames per configuration. It measures display-paced frame intervals, not uncapped GPU throughput. Do not label the output as a ranked score.
+- The current benchmark sweeps 500 to 5,000 lights, with 30 warmup frames and 120 measured frames per configuration. It measures display-paced frame intervals, not uncapped GPU throughput, so Sponza has no score. Do not label its output as a score.
 - Browser device details may be hidden or reduced. `src/device.ts` uses reported WebGPU/WebGL information and reports unavailable fields honestly; do not infer a precise GPU model from core count or OS.
 
 ## Files to know
 
-- `src/simulations.ts`: scene metadata, source URLs, starting cameras, render resolutions.
-- `src/main.ts`: simulation library, selection, settings, modal viewer, results, CSV export.
+- `src/simulations.ts`: scene metadata, source URLs, starting cameras, render resolutions, and each scene's UI text.
+- `src/procedural/`, `src/renderers/orrery.ts`, `src/shaders/orrery.fs.wgsl`: the procedural Orrery scene.
+- `src/main.ts`: the three screens, hash routing, modal viewer, results, CSV export, result upload.
+- `src/ui/frame_chart.ts`: the live frame-time sparkline and the results chart.
+- `scripts/results-api.ts`: dev/preview-server endpoint (`POST /api/results`) that saves uploaded results to `results/` (gitignored). It is exposed to the internet through the dev server, so keep its size cap, rate limit, file limit, and server-chosen file names. Static hosting has no such endpoint; the page reports that upload is unavailable.
 - `src/simulation.ts`: lazy GPU session, scene loading, renderer lifecycle, preview and benchmark integration.
 - `style.css`: responsive UI; preserve keyboard focus styles and reduced-motion support.
 - `src/testing/benchmark.ts`: benchmark protocol, progress callbacks, abort handling, restoration of light settings.
@@ -69,6 +83,6 @@ The Vite default port is 5174. Browser tests start or reuse a server on 5175 so 
 
 `npm run build` runs TypeScript validation, Vite, then `scripts/copy-scenes.mjs`. Preserve the explicit `dist/scenes/` destination; shell `cp` handles trailing slashes differently on macOS and Linux.
 
-The tests cover the root landing page, lazy scene loading, settings, mobile overflow, unsupported browsers, renderer reopen/resolution changes, benchmark cancellation, and CSV export. When adding scenes, update the current one-scene count assertion and add coverage that selects and actually renders each scene. Check browser console output for missing assets, shader validation errors, and lost devices.
+The tests cover the root landing page, lazy scene loading, settings, mobile overflow, unsupported browsers, renderer reopen/resolution changes, benchmark cancellation, and CSV export. When adding scenes, update the scene count assertion and add coverage that selects and actually renders each scene. Check browser console output for missing assets, shader validation errors, and lost devices.
 
 The current GitHub Pages workflow deploys on `main` pushes. Keep asset URLs relative to `import.meta.env.BASE_URL` so project-path hosting works. Do not deploy or push to `main` merely to verify a scene.
