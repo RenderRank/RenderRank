@@ -1,7 +1,7 @@
 import { simulations, renderResolutions } from './simulations';
 import { inspectDevice } from './device';
 import type { SimulationSession } from './simulation';
-import type { BenchmarkResult } from './testing/benchmark';
+import type { BenchmarkResult, BenchmarkScore } from './testing/benchmark';
 
 const icons = {
     cube: '<path d="m12 3 9 5v8l-9 5-9-5V8zM3 8l9 5 9-5M12 13v8M7.5 5.5l9 5"/>',
@@ -35,7 +35,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
             <div class="page-heading"><div><h1>Simulations</h1><p>Select a scene and configure your run.</p></div><span class="scene-count">${String(simulations.length).padStart(2, '0')} <span>AVAILABLE</span></span></div>
             <div class="simulation-layout">
                 <section aria-label="Available simulations"><div id="scene-cards" class="scene-cards"></div>
-                    <div class="scene-specs"><div><span>GRAPHICS API</span><strong>WebGPU</strong></div><div><span>RENDERER</span><strong>Clustered deferred</strong></div><div><span>MATERIALS</span><strong>Physically based</strong></div></div>
+                    <div class="scene-specs"><div><span>GRAPHICS API</span><strong>WebGPU</strong></div><div><span>RENDERER</span><strong id="spec-renderer"></strong></div><div><span>MATERIALS</span><strong id="spec-materials"></strong></div></div>
                 </section>
                 <section class="configuration" aria-labelledby="config-title">
                     <div class="panel-heading"><span class="eyebrow">SELECTED SIMULATION</span><span class="small-dot"></span></div>
@@ -43,15 +43,15 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
                     <div class="divider"></div>
                     <label class="field-label" for="resolution">Render resolution</label>
                     <select id="resolution">${Object.entries(renderResolutions).map(([name, value]) => `<option value="${name}">${name} · ${value.width} × ${value.height}</option>`).join('')}</select>
-                    <div class="light-heading"><label class="field-label" for="lights">Point lights</label><output id="light-value" for="lights">500</output></div>
-                    <input id="lights" type="range" min="1" max="5000" step="1" value="500"><div class="range-labels"><span>1</span><span>5,000</span></div>
+                    <div id="light-settings"><div class="light-heading"><label class="field-label" for="lights">Point lights</label><output id="light-value" for="lights">500</output></div>
+                    <input id="lights" type="range" min="1" max="5000" step="1" value="500"><div class="range-labels"><span>1</span><span>5,000</span></div></div>
                     <div class="run-actions"><button id="run" class="button primary">${icon('play')}Run benchmark</button><button id="preview" class="button secondary">Preview scene${icon('arrow')}</button></div>
-                    <p class="run-note">Benchmark tests 500–5,000 lights at the selected resolution. The light slider applies to preview.</p>
+                    <p id="run-note" class="run-note"></p>
                     <div id="compatibility" class="compatibility" role="status" hidden></div>
                 </section>
             </div>
             <section class="scene-information" aria-labelledby="about-heading"><div><span class="eyebrow">ABOUT THE SCENE</span><h2 id="about-heading">Sponza atrium</h2></div><p id="scene-description"></p></section>
-            <section id="results" class="results" aria-labelledby="results-heading" hidden><div class="results-heading"><div><span class="eyebrow">LAST RUN</span><h2 id="results-heading">Sponza results</h2></div><button id="download" class="button secondary compact">${icon('download')}Export CSV</button></div><p id="result-settings" class="result-settings"></p><div class="table-scroll"><table><thead><tr><th>Point lights</th><th>Avg. frame time</th><th>Min.</th><th>Max.</th></tr></thead><tbody id="result-rows"></tbody></table></div><p class="run-note">Display-paced frame times are limited by refresh rate. These are diagnostic measurements, not GPU throughput scores.</p></section>
+            <section id="results" class="results" aria-labelledby="results-heading" hidden><div class="results-heading"><div><span class="eyebrow">LAST RUN</span><h2 id="results-heading">Sponza results</h2></div><button id="download" class="button secondary compact">${icon('download')}Export CSV</button></div><p id="result-settings" class="result-settings"></p><div id="score" class="score" hidden><span class="eyebrow" id="score-label">SCORE</span><strong id="score-value"></strong><span id="score-detail"></span><p id="score-note" class="run-note"></p></div><div class="table-scroll"><table><thead><tr><th id="result-label">Point lights</th><th>Avg. frame time</th><th>Min.</th><th>Max.</th><th id="result-gpu" hidden>Avg. GPU pass</th></tr></thead><tbody id="result-rows"></tbody></table></div><p id="result-note" class="run-note"></p></section>
             <footer><span>RenderRank</span><span>Browser-based GPU benchmarking</span></footer>
         </main>
     </div>
@@ -70,6 +70,7 @@ let controller: AbortController | undefined;
 let busy = false;
 let failed = false;
 let results: BenchmarkResult[] = [];
+let resultScore: BenchmarkScore | undefined;
 let resultResolution = '';
 let resultScene = selected;
 
@@ -85,6 +86,10 @@ function selectSimulation(id: string) {
     element('scene-type').textContent = selected.category;
     element('scene-description').textContent = selected.description;
     element('about-heading').textContent = selected.name;
+    element('spec-renderer').textContent = selected.renderer;
+    element('spec-materials').textContent = selected.materials;
+    element('run-note').textContent = selected.runNote;
+    element('light-settings').hidden = selected.kind !== 'gltf';
     document.querySelectorAll<HTMLButtonElement>('[data-scene]').forEach(button => {
         const active = button.dataset.scene === id;
         button.setAttribute('aria-pressed', String(active));
@@ -140,7 +145,8 @@ async function openSimulation(benchmark: boolean) {
     element('live-metrics').textContent = '';
     element('loading').hidden = false;
     element('loading-message').textContent = `Loading ${selected.name}…`;
-    element('viewer-help').textContent = benchmark ? 'Testing 10 light counts · Keep this tab visible · Back to stop' : 'W A S D to move · Q / E up and down · Hold mouse to look';
+    element('viewer-help').textContent = benchmark ? selected.benchmarkHelp : selected.previewHelp;
+    canvas.setAttribute('aria-label', `${selected.name} scene`);
     try {
         initializing ??= import('./simulation').then(module => module.createSimulation(canvas, selected, message => {
             failed = true;
@@ -154,8 +160,8 @@ async function openSimulation(benchmark: boolean) {
         session = await initializing;
         if (signal.aborted) return;
         session.configure(resolution.value, Number(lights.value));
-        session.setMetricsCallback((fps, frameTime) => {
-            element('live-metrics').textContent = `${fps.toFixed(0)} FPS  /  ${frameTime.toFixed(1)} ms`;
+        session.setMetricsCallback((fps, frameTime, gpuTime) => {
+            element('live-metrics').textContent = `${fps.toFixed(0)} FPS  /  ${frameTime.toFixed(1)} ms` + (gpuTime === undefined ? '' : `  ·  GPU ${gpuTime.toFixed(1)} ms`);
         });
         element('loading').hidden = true;
         session.start(!benchmark);
@@ -166,12 +172,25 @@ async function openSimulation(benchmark: boolean) {
                 element('benchmark-progress').textContent = message;
             });
             if (signal.aborted) return;
-            results = captured;
+            results = captured.rows;
+            resultScore = captured.score;
             resultScene = selected;
             resultResolution = runResolution;
             element('results-heading').textContent = `${resultScene.name} results`;
-            element('result-rows').innerHTML = results.map(row => `<tr><td>${row.numLights.toLocaleString()}</td><td>${row.avgFrameTimeMs.toFixed(2)} <span>ms</span></td><td>${row.minFrameTimeMs.toFixed(2)} <span>ms</span></td><td>${row.maxFrameTimeMs.toFixed(2)} <span>ms</span></td></tr>`).join('');
-            element('result-settings').textContent = `${selected.name} · ${resultResolution} · Clustered deferred · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+            const hasGpuTimes = results.some(row => row.avgGpuTimeMs !== undefined);
+            element('result-label').textContent = resultScene.resultLabel;
+            element('result-gpu').hidden = !hasGpuTimes;
+            element('result-settings').textContent = `${selected.name} · ${resultResolution} · ${selected.renderer} · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+            const ms = (value: number) => Number.isFinite(value) ? `${value.toFixed(2)} <span>ms</span>` : '—';
+            element('result-rows').innerHTML = results.map(row => `<tr><td>${row.label}</td><td>${ms(row.avgFrameTimeMs)}</td><td>${ms(row.minFrameTimeMs)}</td><td>${ms(row.maxFrameTimeMs)}</td>${hasGpuTimes ? `<td>${ms(row.avgGpuTimeMs ?? NaN)}</td>` : ''}</tr>`).join('');
+            element('score').hidden = !resultScore;
+            if (resultScore) {
+                element('score-label').textContent = `${resultScene.name.toUpperCase()} ${resultResolution.toUpperCase()} SCORE`;
+                element('score-value').textContent = resultScore.valid ? resultScore.value.toLocaleString() : '—';
+                element('score-detail').textContent = resultScore.valid ? `${resultScore.averageFps.toFixed(1)} FPS average across shots` : '';
+                element('score-note').textContent = resultScore.note;
+            }
+            element('result-note').textContent = resultScene.resultNote;
             element('results').hidden = false;
             closeViewer();
             element('results').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -198,7 +217,14 @@ preview.addEventListener('click', () => void openSimulation(false));
 element('close-viewer').addEventListener('click', closeViewer);
 viewer.addEventListener('cancel', event => { event.preventDefault(); closeViewer(); });
 element('download').addEventListener('click', () => {
-    const csv = ['Scene,Resolution,Number of Lights,Average Frame Time (ms),Min Frame Time (ms),Max Frame Time (ms)', ...results.map(row => `${resultScene.name},${resultResolution},${row.numLights},${row.avgFrameTimeMs.toFixed(3)},${row.minFrameTimeMs.toFixed(3)},${row.maxFrameTimeMs.toFixed(3)}`)].join('\n');
+    const firstColumn = resultScene.kind === 'gltf' ? 'Number of Lights' : resultScene.resultLabel;
+    const number = (value: number | undefined) => value === undefined || !Number.isFinite(value) ? '' : value.toFixed(3);
+    const lines = [`Scene,Resolution,${firstColumn},Average Frame Time (ms),Min Frame Time (ms),Max Frame Time (ms),Average GPU Pass Time (ms),Score`,
+        ...results.map(row => `${resultScene.name},${resultResolution},${row.numLights ?? row.label},${number(row.avgFrameTimeMs)},${number(row.minFrameTimeMs)},${number(row.maxFrameTimeMs)},${number(row.avgGpuTimeMs)},`)];
+    if (resultScore) {
+        lines.push(`${resultScene.name},${resultResolution},Overall,${number(1000 / resultScore.averageFps)},,,,${resultScore.valid ? resultScore.value : 'invalid'}`);
+    }
+    const csv = lines.join('\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
     const link = document.createElement('a');
     link.href = url;

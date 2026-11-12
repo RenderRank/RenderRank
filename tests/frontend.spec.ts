@@ -5,8 +5,9 @@ test('root opens the library without fetching or starting Sponza', async ({ page
     page.on('request', request => { if (request.url().includes('/scenes/')) scenes.push(request.url()); });
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'Simulations', exact: true })).toBeVisible();
-    await expect(page.locator('.scene-card')).toHaveCount(1);
-    await expect(page.locator('.scene-card')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('.scene-card')).toHaveCount(2);
+    await expect(page.locator('.scene-card[aria-pressed="true"]')).toHaveCount(1);
+    await expect(page.locator('.scene-card[data-scene="sponza"]')).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByRole('navigation', { name: 'Scenes' }).getByRole('button', { name: 'Sponza' })).toBeVisible();
     await expect(page.locator('.sidebar')).not.toContainText('WORKSPACE');
     await expect(page.locator('#device-system')).not.toHaveText('—');
@@ -37,7 +38,7 @@ test('unsupported browsers can inspect the library with a useful explanation', a
     await expect(page.getByRole('button', { name: 'Run benchmark' })).toBeDisabled();
     await expect(page.getByRole('button', { name: 'Preview scene' })).toBeDisabled();
     await expect(page.locator('#compatibility')).toContainText('WebGPU-compatible browser');
-    await expect(page.locator('.scene-card img')).toBeVisible();
+    await expect(page.locator('.scene-card img').first()).toBeVisible();
 });
 
 test('preview renders, closes, and reopens at a different resolution', async ({ page }, testInfo) => {
@@ -71,7 +72,56 @@ test('benchmark can be cancelled and restarted, then exports its results', async
     await page.getByRole('button', { name: 'Run benchmark' }).click();
     await expect(page.locator('#results')).toBeVisible({ timeout: 60_000 });
     await expect(page.locator('#result-rows tr')).toHaveCount(10);
+    await expect(page.locator('#score')).toBeHidden();
     const download = page.waitForEvent('download');
     await page.getByRole('button', { name: 'Export CSV' }).click();
     expect((await download).suggestedFilename()).toMatch(/^renderrank-sponza-1080p-.*\.csv$/);
+});
+
+test('Orrery renders its camera path without loading scene assets, then switches back to Sponza', async ({ page }, testInfo) => {
+    const errors: string[] = [];
+    const scenes: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+    page.on('request', request => { if (request.url().includes('/scenes/')) scenes.push(request.url()); });
+    await page.goto('/');
+    await expect(page.locator('#gpu-status')).toContainText('WebGPU ready');
+    await page.getByRole('navigation', { name: 'Scenes' }).getByRole('button', { name: 'Orrery' }).click();
+    await expect(page.locator('.scene-card[data-scene="orrery"]')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('#spec-renderer')).toHaveText('Ray-marched SDF');
+    await expect(page.locator('#light-settings')).toBeHidden();
+    await page.getByRole('button', { name: 'Preview scene' }).click();
+    await expect(page.locator('#loading')).toBeHidden({ timeout: 30_000 });
+    await expect(page.locator('#viewer-help')).toContainText('Fixed camera path');
+    await expect(page.locator('#live-metrics')).toContainText('FPS', { timeout: 60_000 });
+    await page.screenshot({ path: testInfo.outputPath('orrery.png') });
+    await page.getByRole('button', { name: 'Back', exact: true }).click();
+    await expect(page.locator('#viewer')).toBeHidden();
+    expect(scenes).toEqual([]);
+
+    await page.getByRole('navigation', { name: 'Scenes' }).getByRole('button', { name: 'Sponza' }).click();
+    await expect(page.locator('#light-settings')).toBeVisible();
+    await page.getByRole('button', { name: 'Preview scene' }).click();
+    await expect(page.locator('#loading')).toBeHidden({ timeout: 30_000 });
+    await expect(page.locator('#live-metrics')).toContainText('FPS');
+    await page.keyboard.press('Escape');
+    expect(errors).toEqual([]);
+});
+
+test('Orrery benchmark plays four shots, shows a score, and exports them', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gpu-status')).toContainText('WebGPU ready');
+    await page.getByRole('navigation', { name: 'Scenes' }).getByRole('button', { name: 'Orrery' }).click();
+    await page.getByRole('button', { name: 'Run benchmark' }).click();
+    await expect(page.locator('#benchmark-progress')).toContainText('Shot 1 of 4', { timeout: 30_000 });
+    await expect(page.locator('#results')).toBeVisible({ timeout: 70_000 });
+    await expect(page.locator('#result-label')).toHaveText('Shot');
+    await expect(page.locator('#result-rows tr')).toHaveCount(4);
+    await expect(page.locator('#score')).toBeVisible();
+    await expect(page.locator('#score-label')).toHaveText('ORRERY 1080P SCORE');
+    // A software adapter may be too slow to finish a frame in every shot, which shows a dash instead of a number
+    await expect(page.locator('#score-value')).toHaveText(/^[\d,]+$|^—$/);
+    const download = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Export CSV' }).click();
+    expect((await download).suggestedFilename()).toMatch(/^renderrank-orrery-1080p-.*\.csv$/);
 });

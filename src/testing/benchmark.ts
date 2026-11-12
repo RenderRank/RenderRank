@@ -2,10 +2,25 @@ import { Stage } from '../stage/stage';
 import { DisplayDriver } from '../drivers/display_driver';
 
 export interface BenchmarkResult {
-    numLights: number;
+    label: string;          // what this row measured: a light count, or a shot name
+    numLights?: number;
+    avgGpuTimeMs?: number;  // GPU time of the main pass, where timestamp queries are available
     avgFrameTimeMs: number;
     minFrameTimeMs: number;
     maxFrameTimeMs: number;
+}
+
+// A single number for a whole run. Only produced by benchmarks that measure uncapped throughput.
+export interface BenchmarkScore {
+    value: number;
+    averageFps: number; // the frame rate the score is derived from
+    valid: boolean;     // false if something made the run meaningless, such as a hidden tab
+    note: string;
+}
+
+export interface BenchmarkRun {
+    rows: BenchmarkResult[];
+    score?: BenchmarkScore;
 }
 
 export class BenchmarkRunner {
@@ -99,6 +114,7 @@ export class BenchmarkRunner {
         const maxFrameTime = Math.max(...this.frameTimes);
 
         return {
+            label: numLights.toLocaleString(),
             numLights,
             avgFrameTimeMs: avgFrameTime,
             minFrameTimeMs: minFrameTime,

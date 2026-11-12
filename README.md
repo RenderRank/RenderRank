@@ -2,7 +2,7 @@
 
 **Cross-platform 3D rendering GPU benchmarks in the browser.**
 
-RenderRank runs WebGPU rendering tests in the browser. Select Sponza, choose a resolution, preview the scene, or run a light-count sweep and export frame-time results as CSV. Ranked scores, saved history, and a public leaderboard are planned.
+RenderRank runs WebGPU rendering tests in the browser. Select a scene, choose a resolution, preview it, or run its benchmark and export frame-time results as CSV. Sponza runs a light-count sweep; the procedural Orrery plays a fixed 40-second camera path. Ranked scores, saved history, and a public leaderboard are planned.
 
 **Live build:** [renderrank.tonyxtian.com](https://renderrank.tonyxtian.com)
 
@@ -40,7 +40,7 @@ The planned suite combines adjustable scene features, repeatable presets, and pe
 
 ## How it works
 
-1. **Choose a scene.** The landing page currently lists Sponza. Select 1080p, 1440p, or 2160p.
+1. **Choose a scene.** The landing page lists Sponza and the Orrery. Select 1080p, 1440p, or 2160p.
 2. **Preview or benchmark.** Preview supports free-camera movement and 1–5,000 point lights. Benchmark sweeps 500–5,000 lights in 500-light increments; use Back to stop.
 3. **Export results.** Review average, minimum, and maximum frame times, then download CSV. Results remain available until the page is reloaded.
 
@@ -91,7 +91,9 @@ The codebase starts from a WebGPU renderer (TypeScript + Vite) that draws the Sp
 
 The original naive and Forward+ renderers were removed because no benchmark test uses them. They're still in git history.
 
-The root page opens a simulation library with the Sponza scene, resolution and preview light controls, a lazy-loaded interactive viewer, device information, benchmark progress, and CSV export. The basic frame-time benchmark runner lives in `src/testing/benchmark.ts`. A fixed-run protocol, persistent result storage, and leaderboard remain to be built.
+The second scene, the **Orrery**, has no meshes or textures. Its geometry is a signed distance function ray-marched in one fragment shader (`src/shaders/orrery.fs.wgsl`), with soft shadows from two lights, ambient occlusion, one reflection bounce, and a shadowed volumetric sun shaft. Its camera and mechanism follow a fixed timeline (`src/procedural/orrery_timeline.ts`). Its benchmark renders offscreen without a frame-rate cap and reports a score: 100 × the harmonic mean of the four shots' frame rates. On an RTX 5080 in Chrome it scored about 4,600 at 2160p (46 FPS) and about 16,500 at 1080p (165 FPS).
+
+The root page opens a simulation library with both scenes, resolution and preview light controls, a lazy-loaded interactive viewer, device information, benchmark progress, and CSV export. The basic frame-time benchmark runner lives in `src/testing/benchmark.ts`. A fixed-run protocol, persistent result storage, and leaderboard remain to be built.
 
 Scene registration instructions and current loader limitations are in [AGENTS.md](AGENTS.md). The scene catalog is `src/simulations.ts`.
 
@@ -128,7 +130,8 @@ src/
   device.ts         browser-reported GPU, system, and browser details
   gpu/              GpuContext (adapter, device, canvas, recorded adapter info) and mipmap generation
   renderer.ts       renderer base: encodes frames into offscreen targets at a fixed resolution
-  renderers/        clustered deferred renderer
+  renderers/        clustered deferred renderer (glTF scenes) and the Orrery ray-marcher
+  procedural/       the Orrery's camera/animation timeline and its session loop
   passes/           shared passes: tonemap, present (scaled blit to the canvas)
   drivers/          frame loops; DisplayDriver is the rAF-paced one
   shaders/          WGSL shaders and the constants injected into them

@@ -7,21 +7,28 @@ import { Lights } from './stage/lights';
 import { Camera } from './stage/camera';
 import { Stage } from './stage/stage';
 import { BenchmarkRunner } from './testing/benchmark';
-import type { BenchmarkResult } from './testing/benchmark';
+import type { BenchmarkResult, BenchmarkRun } from './testing/benchmark';
 import { renderResolutions } from './simulations';
-import type { Simulation } from './simulations';
+import type { GltfSimulation, Simulation } from './simulations';
 
 export interface SimulationSession {
     configure(resolution: string, lights: number): void;
     start(interactive: boolean): void;
     stop(): void;
     destroy(): void;
-    setMetricsCallback(callback: (fps: number, frameTime: number) => void): void;
-    benchmark(signal: AbortSignal, progress: (message: string) => void): Promise<BenchmarkResult[]>;
+    setMetricsCallback(callback: (fps: number, frameTime: number, gpuTime?: number) => void): void;
+    benchmark(signal: AbortSignal, progress: (message: string) => void): Promise<BenchmarkRun>;
     isBenchmarkRunning(): boolean;
 }
 
 export async function createSimulation(canvas: HTMLCanvasElement, simulation: Simulation, onLost: (message: string) => void): Promise<SimulationSession> {
+    if (simulation.kind === 'procedural') {
+        return (await import('./procedural/orrery_session')).createOrrerySession(canvas, onLost);
+    }
+    return createGltfSimulation(canvas, simulation, onLost);
+}
+
+async function createGltfSimulation(canvas: HTMLCanvasElement, simulation: GltfSimulation, onLost: (message: string) => void): Promise<SimulationSession> {
     const gpu = await GpuContext.create(canvas);
     let driver: DisplayDriver | undefined;
     gpu.lost.then(info => {
@@ -79,7 +86,7 @@ export async function createSimulation(canvas: HTMLCanvasElement, simulation: Si
                 let captured: BenchmarkResult[] = [];
                 runner.setProgressCallback(progress);
                 runner.setCompleteCallback(results => { captured = results; });
-                try { await runner.runBenchmark(signal); return captured; }
+                try { await runner.runBenchmark(signal); return { rows: captured }; }
                 finally { display.setFrameTimeCallback(reportFrame); }
             },
             isBenchmarkRunning() { return runner.isTestRunning(); },
