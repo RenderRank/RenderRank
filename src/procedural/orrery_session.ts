@@ -43,6 +43,7 @@ export async function createOrrerySession(canvas: HTMLCanvasElement, onLost: (me
         let presentPass = new PresentPass(gpu, renderer.outputTexture);
 
         let metrics: (fps: number, frameTime: number, gpuTime?: number) => void = () => {};
+        let sample: ((frameTime: number) => void) | null = null;
         let benchmarkRunning = false;
 
         // Submits one frame at timeline time t, optionally with a copy to the canvas
@@ -66,6 +67,7 @@ export async function createOrrerySession(canvas: HTMLCanvasElement, onLost: (me
             submitFrame((time - timelineStart) / 1000, true);
 
             if (prevTime !== 0) {
+                sample?.(time - prevTime);
                 elapsed += time - prevTime;
                 frames++;
                 if (elapsed >= 500) {
@@ -118,6 +120,8 @@ export async function createOrrerySession(canvas: HTMLCanvasElement, onLost: (me
                 let spreadShot = -1;
                 let windowStart = start;
                 let windowFrames = 0;
+                let sampleStart = start;
+                let sampleFrames = 0;
 
                 while (true) {
                     checkAbort();
@@ -150,6 +154,14 @@ export async function createOrrerySession(canvas: HTMLCanvasElement, onLost: (me
                                 spreadStart = now;
                                 spreadFrames = 0;
                             }
+                        }
+
+                        // Graph samples: 50 ms windows smooth out the bursts completion callbacks arrive in
+                        sampleFrames++;
+                        if (now - sampleStart >= 50) {
+                            sample?.((now - sampleStart) / sampleFrames);
+                            sampleStart = now;
+                            sampleFrames = 0;
                         }
 
                         windowFrames++;
@@ -216,6 +228,7 @@ export async function createOrrerySession(canvas: HTMLCanvasElement, onLost: (me
             stop,
             destroy() { stop(); renderer.destroy(); gpu.destroy(); },
             setMetricsCallback(callback) { metrics = callback; },
+            setSampleCallback(callback) { sample = callback; },
             async benchmark(signal, progress) {
                 benchmarkRunning = true;
                 try {

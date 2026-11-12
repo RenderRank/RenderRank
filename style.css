@@ -133,3 +133,32 @@ body:has(dialog[open]) { overflow: hidden; }
 .score > span:not(.eyebrow) { font-size: 12px; color: #b6b8bf; }
 .score .run-note { grid-column: 1 / -1; margin: 0; }
 .score[hidden] { display: none; }
+/* Three-screen layout: library, scene setup, results */
+.scene-nav { text-decoration: none; border-radius: 6px; }
+.scene-nav.nested { padding-left: 30px; }
+.scene-cards { grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); }
+.back-link { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 22px; font-size: 12px; color: #a4a5aa; }
+.back-link:hover { color: #f1bf7c; }
+.back-link svg { width: 14px; height: 14px; }
+.scene-image.framed { border: 1px solid var(--line); border-radius: 10px; }
+.scene-description { color: #8d9098; font-size: 13px; line-height: 1.9; margin: 26px 2px 0; max-width: 640px; }
+.field-label.first { margin-top: 22px; }
+.last-result { display: flex; align-items: center; justify-content: space-between; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 12px; color: #f1bf7c; }
+.last-result svg { width: 14px; height: 14px; }
+main > .compatibility { margin: 0 0 24px; }
+.results-heading { align-items: flex-start; margin-bottom: 24px; }
+.results-heading .result-settings { margin: 11px 0 0; }
+.result-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
+.result-actions .primary svg { fill: none; width: 16px; height: 16px; }
+.upload-status { margin: -8px 0 20px; font-size: 12px; color: #d7b98e; overflow-wrap: anywhere; }
+.section-title { margin: 30px 0 14px; font-size: 14px; font-weight: 500; color: #c9cad0; }
+.frame-chart { position: relative; min-height: 260px; border: 1px solid var(--line); border-radius: 10px; background: #15161a; overflow: hidden; }
+.frame-chart svg { display: block; width: 100%; height: 260px; font-family: inherit; font-variant-numeric: tabular-nums; }
+.chart-tooltip { position: absolute; display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; background: #26272c; border: 1px solid #3c3e45; border-radius: 6px; pointer-events: none; white-space: nowrap; }
+.chart-tooltip strong { font-size: 13px; font-weight: 550; color: #ededee; font-variant-numeric: tabular-nums; }
+.chart-tooltip span { font-size: 11px; color: #a4a5aa; }
+/* Viewer toolbar: live frame-time graph to the left of the FPS readout */
+.live { margin-left: auto; display: flex; align-items: center; gap: 14px; min-width: 0; }
+.live .live-metrics { margin-left: 0; white-space: nowrap; }
+.live-graph { width: 160px; height: 30px; border: 1px solid var(--line); border-radius: 4px; background: #15161a; }
+@media (max-width: 600px) { .scene-nav.nested { padding-left: 12px; } #nav-library { display: none; } .live-graph { width: 96px; height: 24px; } .result-actions { justify-content: flex-start; } .results-heading { flex-direction: column; } }

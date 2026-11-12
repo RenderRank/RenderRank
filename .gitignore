@@ -24,3 +24,6 @@ test-results
 *.njsproj
 *.sln
 *.sw?
+
+# Uploaded benchmark results (written by the dev server)
+results

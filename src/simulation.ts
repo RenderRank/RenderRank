@@ -17,6 +17,9 @@ export interface SimulationSession {
     stop(): void;
     destroy(): void;
     setMetricsCallback(callback: (fps: number, frameTime: number, gpuTime?: number) => void): void;
+    // Frame times in ms as they happen, for graphs. One call per frame, or per short window when frames aren't
+    // display-paced.
+    setSampleCallback(callback: ((frameTime: number) => void) | null): void;
     benchmark(signal: AbortSignal, progress: (message: string) => void): Promise<BenchmarkRun>;
     isBenchmarkRunning(): boolean;
 }
@@ -57,7 +60,9 @@ async function createGltfSimulation(canvas: HTMLCanvasElement, simulation: GltfS
                 elapsed = frames = 0;
             }
         };
-        display.setFrameTimeCallback(reportFrame);
+        // An observer rather than the frame-time callback, which the benchmark runner takes over while it runs
+        let sample: ((frameTime: number) => void) | null = null;
+        display.setFrameObserver(frameTime => { reportFrame(frameTime); sample?.(frameTime); });
         return {
             configure(name, count) {
                 const resolution = renderResolutions[name];
@@ -82,12 +87,13 @@ async function createGltfSimulation(canvas: HTMLCanvasElement, simulation: GltfS
             stop() { camera.inputEnabled = false; camera.keys = {}; display.stop(); },
             destroy() { display.stop(); camera.destroy(); renderer.destroy(); gpu.destroy(); },
             setMetricsCallback(callback) { metrics = callback; },
+            setSampleCallback(callback) { sample = callback; },
             async benchmark(signal, progress) {
                 let captured: BenchmarkResult[] = [];
                 runner.setProgressCallback(progress);
                 runner.setCompleteCallback(results => { captured = results; });
-                try { await runner.runBenchmark(signal); return { rows: captured }; }
-                finally { display.setFrameTimeCallback(reportFrame); }
+                await runner.runBenchmark(signal);
+                return { rows: captured };
             },
             isBenchmarkRunning() { return runner.isTestRunning(); },
         };

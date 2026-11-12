@@ -1,6 +1,9 @@
 import { defineConfig } from 'vite'
+import { resultsApi } from './scripts/results-api'
 
 export default defineConfig({
+    // Saves uploaded results to results/ on this machine. Static hosting (GitHub Pages) has no such endpoint.
+    plugins: [resultsApi()],
     build: {
         target: 'esnext'
     },

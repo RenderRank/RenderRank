@@ -35,3 +35,80 @@ export function inspectDevice(adapter?: GPUAdapter): DeviceDetails {
         cores: navigator.hardwareConcurrency ? `${navigator.hardwareConcurrency} logical cores` : 'Core count not disclosed',
     };
 }
+
+// Everything the browser will say about the machine, for attaching to an uploaded result. Fields a browser doesn't
+// expose are left out rather than guessed. Nothing here identifies a person: no IP address, language, or time zone.
+export async function collectDeviceReport(adapter?: GPUAdapter): Promise<Record<string, unknown>> {
+    const report: Record<string, unknown> = {
+        summary: inspectDevice(adapter),
+        userAgent: navigator.userAgent,
+        platform: navigator.platform,
+        logicalCores: navigator.hardwareConcurrency,
+        deviceMemoryGiB: (navigator as { deviceMemory?: number }).deviceMemory, // Chromium only, and bucketed
+        maxTouchPoints: navigator.maxTouchPoints,
+        crossOriginIsolated: window.crossOriginIsolated,
+        screen: {
+            width: screen.width,
+            height: screen.height,
+            availableWidth: screen.availWidth,
+            availableHeight: screen.availHeight,
+            colorDepth: screen.colorDepth,
+            devicePixelRatio: window.devicePixelRatio,
+            highDynamicRange: matchMedia('(dynamic-range: high)').matches,
+        },
+    };
+
+    // User-Agent Client Hints (Chromium): exact browser and OS versions, CPU architecture, phone model
+    const uaData = (navigator as { userAgentData?: { brands: unknown; mobile: boolean; platform: string; getHighEntropyValues(hints: string[]): Promise<unknown> } }).userAgentData;
+    if (uaData) {
+        try {
+            report.clientHints = await uaData.getHighEntropyValues(['architecture', 'bitness', 'model', 'platformVersion', 'fullVersionList', 'formFactors', 'wow64']);
+        } catch {
+            report.clientHints = { brands: uaData.brands, mobile: uaData.mobile, platform: uaData.platform };
+        }
+    }
+
+    if (adapter) {
+        const info = adapter.info;
+        const limits: Record<string, number> = {};
+        for (const name in adapter.limits) {
+            const value = adapter.limits[name as keyof GPUSupportedLimits];
+            if (typeof value === 'number') limits[name] = value;
+        }
+        report.webgpu = {
+            vendor: info.vendor,
+            architecture: info.architecture,
+            device: info.device,
+            description: info.description,
+            subgroupMinSize: info.subgroupMinSize,
+            subgroupMaxSize: info.subgroupMaxSize,
+            isFallbackAdapter: info.isFallbackAdapter,
+            preferredCanvasFormat: navigator.gpu.getPreferredCanvasFormat(),
+            features: [...adapter.features].sort(),
+            limits,
+        };
+    }
+
+    // The WebGL renderer string usually names the GPU model and graphics backend where WebGPU doesn't
+    const gl = document.createElement('canvas').getContext('webgl');
+    if (gl) {
+        const debug = gl.getExtension('WEBGL_debug_renderer_info');
+        report.webgl = {
+            vendor: debug ? gl.getParameter(debug.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR),
+            renderer: debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
+            version: gl.getParameter(gl.VERSION),
+        };
+        gl.getExtension('WEBGL_lose_context')?.loseContext();
+    }
+
+    // Laptops often cap the GPU on battery, so the power state explains some results (Chromium only)
+    const getBattery = (navigator as { getBattery?: () => Promise<{ charging: boolean; level: number }> }).getBattery;
+    if (getBattery) {
+        try {
+            const battery = await getBattery.call(navigator);
+            report.battery = { charging: battery.charging, level: battery.level };
+        } catch { /* blocked by permissions policy */ }
+    }
+
+    return report;
+}

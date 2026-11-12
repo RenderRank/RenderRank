@@ -93,6 +93,8 @@ The original naive and Forward+ renderers were removed because no benchmark test
 
 The second scene, the **Orrery**, has no meshes or textures. Its geometry is a signed distance function ray-marched in one fragment shader (`src/shaders/orrery.fs.wgsl`), with soft shadows from two lights, ambient occlusion, one reflection bounce, and a shadowed volumetric sun shaft. Its camera and mechanism follow a fixed timeline (`src/procedural/orrery_timeline.ts`). Its benchmark renders offscreen without a frame-rate cap and reports a score: 100 × the harmonic mean of the four shots' frame rates. On an RTX 5080 in Chrome it scored about 4,600 at 2160p (46 FPS) and about 16,500 at 1080p (165 FPS).
 
+The app has three screens: the simulation library, a setup screen per scene (resolution, preview, run), and a results screen with the score, a frame-time graph of the whole run, a per-segment table, CSV export, and **Upload score**. Upload saves the run and everything the browser reveals about the device (GPU, OS, browser, CPU threads, memory bucket, screen, WebGPU features and limits) as a JSON file under `results/` on the machine running the dev server; that directory is gitignored. No IP address, language, or time zone is stored.
+
 The root page opens a simulation library with both scenes, resolution and preview light controls, a lazy-loaded interactive viewer, device information, benchmark progress, and CSV export. The basic frame-time benchmark runner lives in `src/testing/benchmark.ts`. A fixed-run protocol, persistent result storage, and leaderboard remain to be built.
 
 Scene registration instructions and current loader limitations are in [AGENTS.md](AGENTS.md). The scene catalog is `src/simulations.ts`.

@@ -4,6 +4,7 @@
 
 - Never push to `main` without the user's explicit permission. Keep frontend work on a feature branch.
 - The root URL must open the simulation library. Load the renderer and scene assets only after Preview or Run benchmark is selected.
+- The app has three screens chosen by the URL hash: `#/` (library), `#/scene/<id>` (setup, preview, run), and `#/results` (last run). Keep each screen to its one job.
 - Keep the UI minimal: real scenes, real device information, functional controls, no placeholder scenes or invented scores.
 - Respect existing changes and untracked assets in the working tree.
 
@@ -60,7 +61,9 @@ Registering a URL does not guarantee that an arbitrary glTF will render correctl
 
 - `src/simulations.ts`: scene metadata, source URLs, starting cameras, render resolutions, and each scene's UI text.
 - `src/procedural/`, `src/renderers/orrery.ts`, `src/shaders/orrery.fs.wgsl`: the procedural Orrery scene.
-- `src/main.ts`: simulation library, selection, settings, modal viewer, results, CSV export.
+- `src/main.ts`: the three screens, hash routing, modal viewer, results, CSV export, result upload.
+- `src/ui/frame_chart.ts`: the live frame-time sparkline and the results chart.
+- `scripts/results-api.ts`: dev/preview-server endpoint (`POST /api/results`) that saves uploaded results to `results/` (gitignored). It is exposed to the internet through the dev server, so keep its size cap, rate limit, file limit, and server-chosen file names. Static hosting has no such endpoint; the page reports that upload is unavailable.
 - `src/simulation.ts`: lazy GPU session, scene loading, renderer lifecycle, preview and benchmark integration.
 - `style.css`: responsive UI; preserve keyboard focus styles and reduced-motion support.
 - `src/testing/benchmark.ts`: benchmark protocol, progress callbacks, abort handling, restoration of light settings.
