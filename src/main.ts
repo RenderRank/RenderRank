@@ -1,11 +1,13 @@
 import { simulations, renderResolutions } from './simulations';
 import type { Simulation } from './simulations';
-import { collectDeviceReport, inspectDevice } from './device';
+import { inspectDevice } from './device';
 import type { SimulationSession } from './simulation';
-import type { BenchmarkResult, BenchmarkScore } from './testing/benchmark';
 import { mountFrameChart, Sparkline } from './ui/frame_chart';
 import type { FrameSample, Segment } from './ui/frame_chart';
-import { constants as shaderConstants } from './shaders/shaders';
+import { buildRunReport } from './report';
+import type { RunMeasurements, RunReport } from './report';
+import { formatJson, renderReport } from './ui/report_view';
+import { maxReportFileBytes, parseRunReport, reportFileName } from './report_file';
 import { accountsEnabled, currentAccount, onAccountChange, renderSignInButton, signOut } from './auth';
 
 const icons = {
@@ -16,28 +18,25 @@ const icons = {
     back: '<path d="M19 12H5m6-6-6 6 6 6"/>',
     download: '<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>',
     upload: '<path d="M12 15V3m-5 5 5-5 5 5M4 16v5h16v-5"/>',
+    file: '<path d="M14 3H6v18h12V7zm0 0v4h4M9 13h6m-6 4h6"/>',
 };
 function icon(name: keyof typeof icons) {
     return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name]}</svg>`;
 }
 function element<T extends HTMLElement>(id: string) { return document.getElementById(id) as T; }
 
-// A finished benchmark, kept until the next one replaces it
-interface CompletedRun {
-    scene: Simulation;
-    resolution: string;
-    finishedAt: Date;
-    rows: BenchmarkResult[];
-    score?: BenchmarkScore;
-    samples: FrameSample[];
-    segments: Segment[];
-    uploadedId?: string;
+// What the results screen shows: the last benchmark run in this tab, or a report opened from a file, whichever came
+// last. The screen is drawn from the report alone, so an opened report looks exactly as it did when its run finished.
+interface ShownResult {
+    report: RunReport;
+    file?: string;        // name of the file it was opened from
+    uploadedId?: string;  // set once the server saved it
 }
 
 // The app is three screens, one visible at a time, chosen by the URL hash:
 //   #/              library: pick a scene
 //   #/scene/<id>    setup: that scene's settings, preview, and run
-//   #/results       results of the last benchmark
+//   #/results       results of the last benchmark, or of a report opened from a file
 // The viewer dialog sits on top of the setup screen while a scene is running.
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <aside class="sidebar">
@@ -69,6 +68,12 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
             <section id="view-library" aria-labelledby="library-heading">
                 <div class="page-heading"><div><h1 id="library-heading">Simulations</h1><p>Choose a scene to set up a run.</p></div><span class="scene-count">${String(simulations.length).padStart(2, '0')} <span>AVAILABLE</span></span></div>
                 <div class="scene-cards">${simulations.map((scene, i) => `<a class="scene-card" data-scene="${scene.id}" href="#/scene/${scene.id}"><div class="scene-image"><img src="${scene.preview}" alt="${scene.previewAlt}"><span class="scene-number">SCENE ${String(i + 1).padStart(2, '0')}</span></div><div class="scene-card-body"><div><span class="eyebrow">${scene.category}</span><h2>${scene.name}</h2><p>${scene.summary}</p></div><span class="scene-card-arrow">${icon('arrow')}</span></div></a>`).join('')}</div>
+                <section id="open-report" class="open-report" aria-labelledby="open-report-title">
+                    <div class="open-report-text"><h2 id="open-report-title">Saved report</h2><p>Open a run report saved with Export JSON to see its results again. You can also drop the file here.</p></div>
+                    <button id="open-report-button" class="button secondary compact">${icon('file')}Open report</button>
+                    <input id="report-file" type="file" accept=".json,application/json" hidden>
+                    <p id="open-report-status" class="open-report-status" role="alert" hidden></p>
+                </section>
             </section>
 
             <section id="view-scene" aria-labelledby="scene-heading" hidden>
@@ -96,7 +101,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
             <section id="view-results" aria-labelledby="results-heading" hidden>
                 <a class="back-link" id="results-back" href="#/">${icon('back')}Back to scene</a>
                 <div class="results-heading"><div><h1 id="results-heading">Results</h1><p id="result-settings" class="result-settings"></p></div>
-                    <div class="result-actions"><button id="run-again" class="button secondary compact">${icon('play')}Run again</button><button id="download" class="button secondary compact">${icon('download')}Export CSV</button><button id="upload" class="button primary compact">${icon('upload')}<span>Upload score</span></button></div></div>
+                    <div class="result-actions"><button id="run-again" class="button secondary compact">${icon('play')}Run again</button><button id="download" class="button secondary compact">${icon('download')}Export JSON</button><button id="upload" class="button primary compact">${icon('upload')}<span>Upload score</span></button></div></div>
                 <p id="upload-status" class="upload-status" role="status" hidden></p>
                 <div id="score" class="score" hidden><span class="eyebrow" id="score-label">SCORE</span><strong id="score-value"></strong><span id="score-detail"></span><p id="score-note" class="run-note"></p></div>
                 <h2 class="section-title">Frame time over the run</h2>
@@ -104,12 +109,15 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
                 <h2 class="section-title" id="table-title">By segment</h2>
                 <div class="table-scroll"><table><thead><tr><th id="result-label">Point lights</th><th>Avg. frame time</th><th>Min.</th><th>Max.</th><th id="result-gpu" hidden>Avg. GPU pass</th></tr></thead><tbody id="result-rows"></tbody></table></div>
                 <p id="result-note" class="run-note"></p>
+                <h2 class="section-title">Run report</h2>
+                <p class="run-note report-intro">Export JSON saves, and Upload score sends, exactly this report: the score, frame times, and table above, and every detail below. It contains no IP address, language, or time zone.</p>
+                <div id="report" class="report"></div>
             </section>
 
             <footer><span>RenderRank</span><span>Browser-based GPU benchmarking</span></footer>
         </main>
     </div>
-    <dialog id="viewer" aria-labelledby="viewer-title"><div class="viewer-shell"><div class="viewer-toolbar"><button id="close-viewer" class="button secondary compact">${icon('back')}Back</button><div class="viewer-title"><strong id="viewer-title"></strong><span id="viewer-mode">Preview</span></div><div class="live"><canvas id="live-graph" class="live-graph" role="img" aria-label="Recent frame times"></canvas><span id="live-metrics" class="live-metrics"></span></div></div><div class="canvas-wrap"><canvas id="mainCanvas" tabindex="0"></canvas><div id="loading" class="loading" role="status"><span class="spinner"></span><span id="loading-message"></span></div></div><div class="viewer-footer"><span id="viewer-help"></span><span id="benchmark-progress" role="status"></span></div></div></dialog>
+    <dialog id="viewer" aria-labelledby="viewer-title"><div class="viewer-shell"><div class="viewer-toolbar"><button id="close-viewer" class="button secondary compact">${icon('back')}Back</button><div class="viewer-title"><strong id="viewer-title"></strong><span id="viewer-mode">Preview</span></div><div class="live"><figure class="live-chart"><figcaption>Frame time</figcaption><div class="live-chart-plot"><span id="live-graph-axis" class="live-chart-axis" aria-hidden="true"></span><canvas id="live-graph" class="live-graph" role="img" aria-label="Recent frame times"></canvas></div></figure><span id="live-metrics" class="live-metrics"></span></div></div><div class="canvas-wrap"><canvas id="mainCanvas" tabindex="0"></canvas><div id="loading" class="loading" role="status"><span class="spinner"></span><span id="loading-message"></span></div></div><div class="viewer-footer"><span id="viewer-help"></span><span id="benchmark-progress" role="status"></span></div></div></dialog>
 `;
 
 const run = element<HTMLButtonElement>('run');
@@ -120,7 +128,7 @@ const viewer = element<HTMLDialogElement>('viewer');
 const canvas = element<HTMLCanvasElement>('mainCanvas');
 const upload = element<HTMLButtonElement>('upload');
 const uploadLabel = upload.querySelector('span')!;
-const sparkline = new Sparkline(element<HTMLCanvasElement>('live-graph'));
+const sparkline = new Sparkline(element<HTMLCanvasElement>('live-graph'), element('live-graph-axis'));
 
 let selected = simulations[0];
 let session: SimulationSession | undefined;
@@ -129,7 +137,7 @@ let controller: AbortController | undefined;
 let busy = false;
 let failed = false;
 let adapter: GPUAdapter | undefined;
-let lastRun: CompletedRun | undefined;
+let shown: ShownResult | undefined;
 let unmountChart: (() => void) | undefined;
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -152,13 +160,13 @@ function selectSimulation(scene: Simulation) {
     const image = element<HTMLImageElement>('scene-image');
     image.src = scene.preview;
     image.alt = scene.previewAlt;
-    element('last-result').hidden = lastRun?.scene.id !== scene.id;
+    element('last-result').hidden = shown?.report.scene.id !== scene.id;
 }
 
 function showScreen() {
     const [, view, id] = location.hash.split('/');
     const scene = simulations.find(candidate => candidate.id === id);
-    const screen = view === 'scene' && scene ? 'scene' : view === 'results' && lastRun ? 'results' : 'library';
+    const screen = view === 'scene' && scene ? 'scene' : view === 'results' && shown ? 'results' : 'library';
 
     // A different scene can't take over while one is running
     if (screen === 'scene' && !busy) selectSimulation(scene!);
@@ -168,7 +176,7 @@ function showScreen() {
     element('view-results').hidden = screen !== 'results';
     element('breadcrumb').textContent = screen === 'library' ? 'Simulations'
         : screen === 'scene' ? `Simulations / ${selected.name}`
-        : `Simulations / ${lastRun!.scene.name} / Results`;
+        : `Simulations / ${shown!.report.scene.name} / Results`;
 
     element('nav-library').classList.toggle('selected', screen === 'library');
     element('nav-results').classList.toggle('selected', screen === 'results');
@@ -283,10 +291,11 @@ async function openSimulation(benchmark: boolean) {
                 }
             });
             if (signal.aborted) return;
-            lastRun = { scene, resolution: runResolution, finishedAt: new Date(), rows: captured.rows, score: captured.score, samples, segments };
-            element('nav-results').hidden = false;
+            const measurements: RunMeasurements = { scene, resolution: runResolution, finishedAt: new Date(), rows: captured.rows, score: captured.score, samples, segments };
+            const report = await buildRunReport(measurements, adapter);
             closeViewer();
-            if (location.hash === '#/results') showScreen(); else location.hash = '#/results';
+            // Shown as its JSON round trip, which is exactly what Export JSON saves and an opened file gives back
+            showResult({ report: JSON.parse(JSON.stringify(report)) as RunReport });
         }
     } catch (error) {
         if (!signal.aborted) {
@@ -315,103 +324,108 @@ viewer.addEventListener('cancel', event => { event.preventDefault(); closeViewer
 // ---------------------------------------------------------------------------------------------------------------------
 // Results
 
-function renderResults() {
-    const result = lastRun!;
-    element<HTMLAnchorElement>('results-back').href = `#/scene/${result.scene.id}`;
-    element('results-heading').textContent = `${result.scene.name} results`;
-    element('result-settings').textContent = `${result.resolution} · ${result.scene.renderer} · ${result.finishedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+function showResult(result: ShownResult) {
+    shown = result;
+    element('nav-results').hidden = false;
+    if (location.hash === '#/results') showScreen(); else location.hash = '#/results';
+}
 
-    element('score').hidden = !result.score;
-    if (result.score) {
-        element('score-label').textContent = `${result.scene.name.toUpperCase()} ${result.resolution.toUpperCase()} SCORE`;
-        element('score-value').textContent = result.score.valid ? result.score.value.toLocaleString() : '—';
-        element('score-detail').textContent = result.score.valid ? `${result.score.averageFps.toFixed(1)} FPS average across shots` : '';
-        element('score-note').textContent = result.score.note;
+function msCell(value: number | null): HTMLTableCellElement {
+    const cell = document.createElement('td');
+    if (value === null) {
+        cell.textContent = '—';
+    } else {
+        const unit = document.createElement('span');
+        unit.textContent = 'ms';
+        cell.append(`${value.toFixed(2)} `, unit);
+    }
+    return cell;
+}
+
+// Draws the results screen from the report alone. Scene text that isn't part of the report (table heading, notes)
+// comes from the catalog; a report from a scene this page doesn't have gets neutral wording.
+function renderResults() {
+    const { report, file, uploadedId } = shown!;
+    const scene = simulations.find(candidate => candidate.id === report.scene.id);
+    const resultLabel = scene?.resultLabel ?? 'Segment';
+    const back = element<HTMLAnchorElement>('results-back');
+    back.href = scene ? `#/scene/${scene.id}` : '#/';
+    back.lastChild!.textContent = scene ? 'Back to scene' : 'All simulations';
+    element('results-heading').textContent = `${report.scene.name} results`;
+    element('result-settings').textContent = `${report.settings.resolution} · ${report.scene.renderer} · ${new Date(report.finishedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}`;
+    element('run-again').hidden = !scene || !(report.settings.resolution in renderResolutions);
+
+    const { score } = report;
+    element('score').hidden = !score;
+    if (score) {
+        element('score-label').textContent = `${report.scene.name.toUpperCase()} ${report.settings.resolution.toUpperCase()} SCORE`;
+        element('score-value').textContent = score.valid ? score.value.toLocaleString() : '—';
+        element('score-detail').textContent = score.valid ? `${score.averageFps.toFixed(1)} FPS average across shots` : '';
+        element('score-note').textContent = score.note;
     }
 
     unmountChart?.();
-    unmountChart = mountFrameChart(element('frame-chart'), result.samples, result.segments);
+    const samples: FrameSample[] = report.frameTimes.tMs.map((tMs, i) => ({ tMs, frameTimeMs: report.frameTimes.frameTimeMs[i] }));
+    unmountChart = mountFrameChart(element('frame-chart'), samples, report.segments);
 
-    const hasGpuTimes = result.rows.some(row => row.avgGpuTimeMs !== undefined);
-    const ms = (value: number) => Number.isFinite(value) ? `${value.toFixed(2)} <span>ms</span>` : '—';
-    element('table-title').textContent = `By ${result.scene.resultLabel.toLowerCase()}`;
-    element('result-label').textContent = result.scene.resultLabel;
+    const hasGpuTimes = report.rows.some(row => row.avgGpuTimeMs !== null);
+    element('table-title').textContent = `By ${resultLabel.toLowerCase()}`;
+    element('result-label').textContent = resultLabel;
     element('result-gpu').hidden = !hasGpuTimes;
-    element('result-rows').innerHTML = result.rows.map(row => `<tr><td>${row.label}</td><td>${ms(row.avgFrameTimeMs)}</td><td>${ms(row.minFrameTimeMs)}</td><td>${ms(row.maxFrameTimeMs)}</td>${hasGpuTimes ? `<td>${ms(row.avgGpuTimeMs ?? NaN)}</td>` : ''}</tr>`).join('');
-    element('result-note').textContent = result.scene.resultNote;
+    element('result-rows').replaceChildren(...report.rows.map(row => {
+        const tr = document.createElement('tr');
+        const label = document.createElement('td');
+        label.textContent = row.label;
+        tr.append(label, msCell(row.avgFrameTimeMs), msCell(row.minFrameTimeMs), msCell(row.maxFrameTimeMs));
+        if (hasGpuTimes) tr.append(msCell(row.avgGpuTimeMs));
+        return tr;
+    }));
+    element('result-note').textContent = scene?.resultNote ?? '';
+    renderReport(element('report'), report);
 
-    upload.disabled = result.uploadedId !== undefined;
-    uploadLabel.textContent = result.uploadedId ? 'Uploaded' : 'Upload score';
+    // An opened report can't be uploaded from here; Upload score is for runs measured in this tab
+    upload.hidden = file !== undefined;
+    upload.disabled = uploadedId !== undefined;
+    uploadLabel.textContent = uploadedId ? 'Uploaded' : 'Upload score';
     const status = element('upload-status');
-    status.hidden = !result.uploadedId;
-    status.textContent = result.uploadedId ? `Saved on the server as ${result.uploadedId}` : '';
+    status.textContent = [file && `Opened from ${file}`, uploadedId && `Saved on the server as ${uploadedId}`].filter(Boolean).join(' · ');
+    status.hidden = status.textContent === '';
 }
 
 element('run-again').addEventListener('click', () => {
-    if (!lastRun || busy) return;
-    resolution.value = lastRun.resolution;
-    location.hash = `#/scene/${lastRun.scene.id}`;
+    if (!shown || busy) return;
+    const scene = simulations.find(candidate => candidate.id === shown!.report.scene.id);
+    if (!scene || !(shown.report.settings.resolution in renderResolutions)) return;
+    resolution.value = shown.report.settings.resolution;
+    location.hash = `#/scene/${scene.id}`;
     // The hash change selects the scene; start once that has happened
     setTimeout(() => void openSimulation(true));
 });
 
+// Saves the report exactly as the results screen prints it; Open report reads it back
 element('download').addEventListener('click', () => {
-    if (!lastRun) return;
-    const { scene, resolution: runResolution, rows, score } = lastRun;
-    const firstColumn = scene.kind === 'gltf' ? 'Number of Lights' : scene.resultLabel;
-    const number = (value: number | undefined) => value === undefined || !Number.isFinite(value) ? '' : value.toFixed(3);
-    const lines = [`Scene,Resolution,${firstColumn},Average Frame Time (ms),Min Frame Time (ms),Max Frame Time (ms),Average GPU Pass Time (ms),Score`,
-        ...rows.map(row => `${scene.name},${runResolution},${row.numLights ?? row.label},${number(row.avgFrameTimeMs)},${number(row.minFrameTimeMs)},${number(row.maxFrameTimeMs)},${number(row.avgGpuTimeMs)},`)];
-    if (score) {
-        lines.push(`${scene.name},${runResolution},Overall,${number(1000 / score.averageFps)},,,,${score.valid ? score.value : 'invalid'}`);
-    }
-    const url = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' }));
+    if (!shown) return;
+    const url = URL.createObjectURL(new Blob([formatJson(shown.report)], { type: 'application/json' }));
     const link = document.createElement('a');
     link.href = url;
-    link.download = `renderrank-${scene.id}-${runResolution}-${Date.now()}.csv`;
+    link.download = reportFileName(shown.report);
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 
-// Sends the whole run, with everything the browser reveals about the device, to this site's server
+// Sends the run report shown on the results screen, unchanged, to this site's server
 upload.addEventListener('click', async () => {
-    const result = lastRun;
-    if (!result || result.uploadedId) return;
+    const result = shown;
+    if (!result || result.file !== undefined || result.uploadedId) return;
     const status = element('upload-status');
     upload.disabled = true;
     uploadLabel.textContent = 'Uploading…';
     status.hidden = true;
     try {
-        const finite = (value: number | undefined) => value !== undefined && Number.isFinite(value) ? Number(value.toFixed(4)) : null;
-        const body = {
-            schemaVersion: 1,
-            finishedAt: result.finishedAt.toISOString(),
-            page: location.origin + location.pathname,
-            scene: { id: result.scene.id, name: result.scene.name, kind: result.scene.kind, renderer: result.scene.renderer },
-            settings: { resolution: result.resolution, ...renderResolutions[result.resolution] },
-            // The constants that define the workload, so results from different versions can be told apart
-            workload: shaderConstants,
-            score: result.score ?? null,
-            rows: result.rows.map(row => ({
-                label: row.label,
-                numLights: row.numLights ?? null,
-                avgFrameTimeMs: finite(row.avgFrameTimeMs),
-                minFrameTimeMs: finite(row.minFrameTimeMs),
-                maxFrameTimeMs: finite(row.maxFrameTimeMs),
-                avgGpuTimeMs: finite(row.avgGpuTimeMs),
-            })),
-            segments: result.segments.map(segment => ({ tMs: Math.round(segment.tMs), label: segment.label })),
-            // Parallel arrays keep the frame-time series compact
-            frameTimes: {
-                tMs: result.samples.map(sample => Math.round(sample.tMs)),
-                frameTimeMs: result.samples.map(sample => Number(sample.frameTimeMs.toFixed(3))),
-            },
-            device: await collectDeviceReport(adapter),
-        };
         const response = await fetch(`${import.meta.env.BASE_URL}api/results`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
+            body: JSON.stringify(result.report),
         });
         const reply = await response.json().catch(() => undefined) as { id?: string; error?: string } | undefined;
         if (!response.ok || !reply?.id) {
@@ -425,7 +439,48 @@ upload.addEventListener('click', async () => {
         uploadLabel.textContent = 'Upload score';
         return;
     }
-    if (lastRun === result && !element('view-results').hidden) renderResults();
+    if (shown === result && !element('view-results').hidden) renderResults();
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Opening a saved report (library screen)
+
+const reportFile = element<HTMLInputElement>('report-file');
+const openReport = element('open-report');
+
+async function openReportFile(file: File) {
+    const status = element('open-report-status');
+    status.hidden = true;
+    try {
+        if (file.size > maxReportFileBytes) throw new Error('It is too large to be a run report.');
+        const { report, uploadedId } = parseRunReport(await file.text());
+        showResult({ report, file: file.name, uploadedId });
+    } catch (error) {
+        status.textContent = `Couldn’t open ${file.name}. ${(error as Error).message}`;
+        status.hidden = false;
+    }
+}
+
+element('open-report-button').addEventListener('click', () => reportFile.click());
+reportFile.addEventListener('change', () => {
+    const file = reportFile.files?.[0];
+    // Cleared so choosing the same file again still opens it
+    reportFile.value = '';
+    if (file) void openReportFile(file);
+});
+openReport.addEventListener('dragover', event => {
+    if (!event.dataTransfer?.types.includes('Files')) return;
+    event.preventDefault();
+    openReport.classList.add('dragging');
+});
+openReport.addEventListener('dragleave', event => {
+    if (!openReport.contains(event.relatedTarget as Node)) openReport.classList.remove('dragging');
+});
+openReport.addEventListener('drop', event => {
+    event.preventDefault();
+    openReport.classList.remove('dragging');
+    const file = event.dataTransfer?.files[0];
+    if (file) void openReportFile(file);
 });
 
 showScreen();

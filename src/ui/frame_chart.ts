@@ -15,19 +15,58 @@ const lineColor = '#efb15a';
 const gridColor = '#292b30';
 const textColor = '#8c8e94';
 
-// Rolling line of the most recent frame times. Drawn on a canvas because it updates every frame.
+// Reference lines at the frame time each common frame rate allows. The live graph labels them in ms, the results chart in FPS
+export const fpsTargets = [120, 60, 30].map(fps => ({ fps, ms: 1000 / fps, label: `${(1000 / fps).toFixed(1)} ms` }));
+const referenceColor = '#45474e';
+
+// Rolling line of the most recent frame times. Drawn on a canvas because it updates every frame. Dashed lines mark the
+// 120, 60, and 30 FPS frame times, labeled in ms in the axis element beside the canvas. The scale zooms so the slowest line
+// above the data sits at 80% of the height.
 export class Sparkline {
     private canvas: HTMLCanvasElement;
+    private axis?: HTMLElement;
     private samples: number[] = [];
     private readonly capacity = 160;
+    private top = 0;
 
-    constructor(canvas: HTMLCanvasElement) {
+    constructor(canvas: HTMLCanvasElement, axis?: HTMLElement) {
         this.canvas = canvas;
+        this.axis = axis;
+        canvas.setAttribute('aria-label', `Recent frame times, with lines at ${fpsTargets.map(target => target.label).join(', ')}`);
     }
 
     clear() {
         this.samples = [];
+        this.setTop(0);
         this.draw();
+    }
+
+    // Ladder of scale tops: 1.25 × 8.3, 16.7, 33.3, 66.7, … ms, so each top leaves one cutoff at 80% of the height
+    private static topFor(maxMs: number): number {
+        let cutoff = 1000 / 120;
+        while (cutoff * 1.25 < maxMs) cutoff *= 2;
+        return cutoff * 1.25;
+    }
+
+    private setTop(top: number) {
+        if (top === this.top) return;
+        this.top = top;
+        if (!this.axis) return;
+        // Slowest line first, so where two labels would collide the slower one keeps its label
+        const height = this.axis.clientHeight;
+        const labels: HTMLElement[] = [];
+        let lastY = -Infinity;
+        for (const target of [...fpsTargets].reverse()) {
+            if (top === 0 || target.ms > top) continue;
+            const fromTop = (1 - target.ms / top) * height;
+            if (Math.abs(fromTop - lastY) < 10) continue;
+            lastY = fromTop;
+            const label = document.createElement('span');
+            label.textContent = target.label;
+            label.style.top = `${(1 - target.ms / top) * 100}%`;
+            labels.push(label);
+        }
+        this.axis.replaceChildren(...labels);
     }
 
     push(frameTimeMs: number) {
@@ -49,13 +88,29 @@ export class Sparkline {
         if (this.samples.length < 2) return;
 
         // Zero-based so a flat line near the bottom means fast, and spikes read as spikes
-        const top = Math.max(...this.samples) * 1.15;
-        const pad = 1.5 * ratio;
+        this.setTop(Sparkline.topFor(Math.max(...this.samples)));
+        const top = this.top;
+        const y = (ms: number) => height - (ms / top) * height;
+
+        context.save();
+        context.strokeStyle = referenceColor;
+        context.lineWidth = ratio;
+        context.setLineDash([3 * ratio, 3 * ratio]);
+        context.beginPath();
+        for (const target of fpsTargets) {
+            if (target.ms > top) continue;
+            const lineY = Math.round(y(target.ms)) + 0.5 * ratio;
+            context.moveTo(0, lineY);
+            context.lineTo(width, lineY);
+        }
+        context.stroke();
+        context.restore();
+
         context.beginPath();
         this.samples.forEach((value, i) => {
             const x = width - (this.samples.length - 1 - i) * (width / (this.capacity - 1));
-            const y = height - pad - (value / top) * (height - 2 * pad);
-            if (i === 0) context.moveTo(x, y); else context.lineTo(x, y);
+            const sampleY = Math.max(ratio, y(value));
+            if (i === 0) context.moveTo(x, sampleY); else context.lineTo(x, sampleY);
         });
         context.strokeStyle = lineColor;
         context.lineWidth = 1.5 * ratio;
@@ -112,6 +167,13 @@ export function mountFrameChart(container: HTMLElement, samples: FrameSample[], 
         for (let seconds = 0; seconds * 1000 <= duration; seconds += xStep) {
             svg.append(svgElement('text', { x: x(seconds * 1000), y: height - 8, 'text-anchor': 'middle', fill: textColor, 'font-size': 10 },
                 `${Number(seconds.toFixed(1))} s`));
+        }
+
+        // Frame-rate reference lines, labeled inside the plot's right edge
+        for (const target of fpsTargets) {
+            if (target.ms > yMax) continue;
+            svg.append(svgElement('line', { x1: margin.left, x2: width - margin.right, y1: y(target.ms), y2: y(target.ms), stroke: referenceColor, 'stroke-dasharray': '4 4' }));
+            svg.append(svgElement('text', { x: width - margin.right - 4, y: y(target.ms) - 4, 'text-anchor': 'end', fill: textColor, 'font-size': 10 }, `${target.fps} FPS`));
         }
 
         // Segment starts. Labels are dropped where they would collide.

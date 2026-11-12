@@ -36,10 +36,45 @@ export function inspectDevice(adapter?: GPUAdapter): DeviceDetails {
     };
 }
 
+export interface DeviceReport {
+    summary: DeviceDetails;
+    userAgent: string;
+    platform: string;
+    logicalCores?: number;
+    deviceMemoryGiB?: number;
+    maxTouchPoints: number;
+    crossOriginIsolated: boolean;
+    screen: {
+        width: number;
+        height: number;
+        availableWidth: number;
+        availableHeight: number;
+        colorDepth: number;
+        devicePixelRatio: number;
+        highDynamicRange: boolean;
+    };
+    // Whatever the browser returns for the requested hints; the set of keys varies
+    clientHints?: Record<string, unknown>;
+    webgpu?: {
+        vendor: string;
+        architecture: string;
+        device: string;
+        description: string;
+        subgroupMinSize?: number;
+        subgroupMaxSize?: number;
+        isFallbackAdapter: boolean;
+        preferredCanvasFormat: string;
+        features: string[];
+        limits: Record<string, number>;
+    };
+    webgl?: { vendor: string; renderer: string; version: string };
+    battery?: { charging: boolean; level: number };
+}
+
 // Everything the browser will say about the machine, for attaching to an uploaded result. Fields a browser doesn't
 // expose are left out rather than guessed. Nothing here identifies a person: no IP address, language, or time zone.
-export async function collectDeviceReport(adapter?: GPUAdapter): Promise<Record<string, unknown>> {
-    const report: Record<string, unknown> = {
+export async function collectDeviceReport(adapter?: GPUAdapter): Promise<DeviceReport> {
+    const report: DeviceReport = {
         summary: inspectDevice(adapter),
         userAgent: navigator.userAgent,
         platform: navigator.platform,
@@ -59,7 +94,7 @@ export async function collectDeviceReport(adapter?: GPUAdapter): Promise<Record<
     };
 
     // User-Agent Client Hints (Chromium): exact browser and OS versions, CPU architecture, phone model
-    const uaData = (navigator as { userAgentData?: { brands: unknown; mobile: boolean; platform: string; getHighEntropyValues(hints: string[]): Promise<unknown> } }).userAgentData;
+    const uaData = (navigator as { userAgentData?: { brands: unknown; mobile: boolean; platform: string; getHighEntropyValues(hints: string[]): Promise<Record<string, unknown>> } }).userAgentData;
     if (uaData) {
         try {
             report.clientHints = await uaData.getHighEntropyValues(['architecture', 'bitness', 'model', 'platformVersion', 'fullVersionList', 'formFactors', 'wow64']);
@@ -94,9 +129,9 @@ export async function collectDeviceReport(adapter?: GPUAdapter): Promise<Record<
     if (gl) {
         const debug = gl.getExtension('WEBGL_debug_renderer_info');
         report.webgl = {
-            vendor: debug ? gl.getParameter(debug.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR),
-            renderer: debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
-            version: gl.getParameter(gl.VERSION),
+            vendor: String(debug ? gl.getParameter(debug.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR)),
+            renderer: String(debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)),
+            version: String(gl.getParameter(gl.VERSION)),
         };
         gl.getExtension('WEBGL_lose_context')?.loseContext();
     }

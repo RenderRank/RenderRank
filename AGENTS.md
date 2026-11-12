@@ -62,11 +62,12 @@ Registering a URL does not guarantee that an arbitrary glTF will render correctl
 
 - `src/simulations.ts`: scene metadata, source URLs, starting cameras, render resolutions, and each scene's UI text.
 - `src/procedural/`, `src/renderers/orrery.ts`, `src/shaders/orrery.fs.wgsl`: the procedural Orrery scene.
-- `src/main.ts`: the three screens, hash routing, modal viewer, results, CSV export, result upload, account controls.
+- `src/main.ts`: the three screens, hash routing, modal viewer, results, JSON export, opening a saved report, result upload, account controls.
 - `src/auth.ts`: Sign in with Google (Google Identity Services, in the browser). Configured by `VITE_GOOGLE_CLIENT_ID` at build time; without it, accounts are off. The stored ID token isn't verified by the page; any future API must verify it. See `doc/auth.md`.
 - `tests/fake-google.ts`: a fake Google Identity Services script for browser tests.
 - `src/ui/frame_chart.ts`: the live frame-time sparkline and the results chart.
-- `scripts/results-api.ts`: dev/preview-server endpoint (`POST /api/results`) that saves uploaded results to `results/` (gitignored). It is exposed to the internet through the dev server, so keep its size cap, rate limit, file limit, and server-chosen file names. Static hosting has no such endpoint; the page reports that upload is unavailable.
+- `src/report.ts`, `src/ui/report_view.ts`: the run report. It is built once at the end of a run, shown in full on the results screen, saved by Export JSON, and uploaded unchanged. The results screen is drawn from the report alone, so a report opened from a file (`src/report_file.ts` validates it) looks exactly as it did when the run finished. Add new fields to the report, not to the upload request or the screen. A change to the report's shape needs a new `schemaVersion` and a reader for the old one, or saved reports stop opening.
+- `scripts/results-api.ts`: dev/preview-server endpoint (`POST /api/results`) that saves uploaded results to `results/` (gitignored). It is exposed to the internet through the dev server, so keep its size cap, rate limit, file limit, and server-chosen file names, and keep `results/` in `server.fs.deny` in `vite.config.ts` so saved files aren't served. Static hosting has no such endpoint; the page reports that upload is unavailable.
 - `src/simulation.ts`: lazy GPU session, scene loading, renderer lifecycle, preview and benchmark integration.
 - `style.css`: responsive UI; preserve keyboard focus styles and reduced-motion support.
 - `src/testing/benchmark.ts`: benchmark protocol, progress callbacks, abort handling, restoration of light settings.
@@ -86,6 +87,6 @@ The Vite default port is 5174. Browser tests start or reuse a server on 5175 so 
 
 `npm run build` runs TypeScript validation, Vite, then `scripts/copy-scenes.mjs`. Preserve the explicit `dist/scenes/` destination; shell `cp` handles trailing slashes differently on macOS and Linux.
 
-The tests cover the root landing page, lazy scene loading, settings, mobile overflow, unsupported browsers, renderer reopen/resolution changes, benchmark cancellation, and CSV export. When adding scenes, update the scene count assertion and add coverage that selects and actually renders each scene. Check browser console output for missing assets, shader validation errors, and lost devices.
+The tests cover the library, scene setup screens, lazy scene loading, settings, mobile overflow, unsupported browsers, renderer reopen/resolution changes, both benchmarks (including cancellation, results, score, and chart), JSON export and reopening the saved file, upload (mocked with `page.route`, so tests never write to `results/`), and Google sign-in (fake script, never contacts Google). When adding scenes, update the scene count assertion and add coverage that selects and actually renders each scene. Check browser console output for missing assets, shader validation errors, and lost devices.
 
 The current GitHub Pages workflow deploys on `main` pushes. Keep asset URLs relative to `import.meta.env.BASE_URL` so project-path hosting works. Do not deploy or push to `main` merely to verify a scene.
