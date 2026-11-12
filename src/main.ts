@@ -1,4 +1,4 @@
-import { simulations, renderResolutions } from './simulations';
+import { simulations, renderResolutions, stabilityPassMark, stressLoopRange } from './simulations';
 import type { Simulation } from './simulations';
 import { inspectDevice } from './device';
 import type { SimulationSession } from './simulation';
@@ -89,9 +89,13 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
                         <span class="eyebrow" id="config-title">RUN SETTINGS</span>
                         <label class="field-label first" for="resolution">Render resolution</label>
                         <select id="resolution">${Object.entries(renderResolutions).map(([name, value]) => `<option value="${name}">${name} · ${value.width} × ${value.height}</option>`).join('')}</select>
+                        <div id="test-settings"><label class="field-label" for="test-mode">Test</label>
+                        <select id="test-mode"><option value="benchmark">Benchmark · one pass</option><option value="stress">Stress test · looped</option></select></div>
+                        <div id="loop-settings" hidden><label class="field-label" for="loops">Loops</label>
+                        <input id="loops" class="number-input" type="number" min="${stressLoopRange.min}" max="${stressLoopRange.max}" step="1" inputmode="numeric" value=""></div>
                         <div id="light-settings"><div class="light-heading"><label class="field-label" for="lights">Point lights</label><output id="light-value" for="lights">500</output></div>
                         <input id="lights" type="range" min="1" max="5000" step="1" value="500"><div class="range-labels"><span>1</span><span>5,000</span></div></div>
-                        <div class="run-actions"><button id="run" class="button primary">${icon('play')}Run benchmark</button><button id="preview" class="button secondary">Preview scene${icon('arrow')}</button></div>
+                        <div class="run-actions"><button id="run" class="button primary">${icon('play')}<span id="run-label">Run benchmark</span></button><button id="preview" class="button secondary">Preview scene${icon('arrow')}</button></div>
                         <p id="run-note" class="run-note"></p>
                         <a id="last-result" class="last-result" href="#/results" hidden>View last result${icon('arrow')}</a>
                     </section>
@@ -107,7 +111,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
                 <h2 class="section-title">Frame time over the run</h2>
                 <div id="frame-chart" class="frame-chart"></div>
                 <h2 class="section-title" id="table-title">By segment</h2>
-                <div class="table-scroll"><table><thead><tr><th id="result-label">Point lights</th><th>Avg. frame time</th><th>Min.</th><th>Max.</th><th id="result-gpu" hidden>Avg. GPU pass</th></tr></thead><tbody id="result-rows"></tbody></table></div>
+                <div class="table-scroll"><table><thead><tr><th id="result-label">Point lights</th><th id="result-score" hidden>Score</th><th>Avg. frame time</th><th>Min.</th><th>Max.</th><th id="result-gpu" hidden>Avg. GPU pass</th></tr></thead><tbody id="result-rows"></tbody></table></div>
                 <p id="result-note" class="run-note"></p>
                 <h2 class="section-title">Run report</h2>
                 <p class="run-note report-intro">Export JSON saves, and Upload score sends, exactly this report: the score, frame times, and table above, and every detail below. It contains no IP address, language, or time zone.</p>
@@ -123,6 +127,8 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 const run = element<HTMLButtonElement>('run');
 const preview = element<HTMLButtonElement>('preview');
 const resolution = element<HTMLSelectElement>('resolution');
+const testMode = element<HTMLSelectElement>('test-mode');
+const loopsInput = element<HTMLInputElement>('loops');
 const lights = element<HTMLInputElement>('lights');
 const viewer = element<HTMLDialogElement>('viewer');
 const canvas = element<HTMLCanvasElement>('mainCanvas');
@@ -144,7 +150,8 @@ let unmountChart: (() => void) | undefined;
 // Screens
 
 function selectSimulation(scene: Simulation) {
-    if (selected.id !== scene.id) {
+    const changed = selected.id !== scene.id;
+    if (changed) {
         session?.destroy();
         session = undefined;
         initializing = undefined;
@@ -155,13 +162,49 @@ function selectSimulation(scene: Simulation) {
     element('scene-description').textContent = scene.description;
     element('spec-renderer').textContent = scene.renderer;
     element('spec-materials').textContent = scene.materials;
-    element('run-note').textContent = scene.runNote;
     element('light-settings').hidden = scene.kind !== 'gltf';
+    element('test-settings').hidden = !scene.stress;
+    if (!scene.stress) testMode.value = 'benchmark';
+    else if (changed || loopsInput.value === '') loopsInput.value = String(scene.stress.defaultLoops);
+    updateRunMode();
     const image = element<HTMLImageElement>('scene-image');
     image.src = scene.preview;
     image.alt = scene.previewAlt;
     element('last-result').hidden = shown?.report.scene.id !== scene.id;
 }
+
+function stressSelected() {
+    return testMode.value === 'stress' && selected.stress !== undefined;
+}
+
+// The loop count field, held to the accepted range; an empty or unreadable entry means the scene's default
+function stressLoops(): number {
+    const value = Math.round(Number(loopsInput.value));
+    if (loopsInput.value.trim() === '' || !Number.isFinite(value)) return selected.stress?.defaultLoops ?? stressLoopRange.min;
+    return Math.min(stressLoopRange.max, Math.max(stressLoopRange.min, value));
+}
+
+function updateRunMode() {
+    const stress = stressSelected() ? selected.stress! : undefined;
+    element('loop-settings').hidden = !stress;
+    element('run-label').textContent = stress ? 'Run stress test' : 'Run benchmark';
+    if (!stress) {
+        element('run-note').textContent = selected.runNote;
+        return;
+    }
+    const loops = stressLoops();
+    const seconds = loops * stress.loopSeconds;
+    const length = seconds < 90 ? `${seconds} seconds` : `about ${Math.round(seconds / 60)} minutes`;
+    element('run-note').textContent = `Stress test runs the ${stress.loopSeconds}-second benchmark ${loops} times back to back, which takes ${length}. `
+        + `It reports frame-rate stability: the lowest loop score as a percentage of the highest. ${stabilityPassMark * 100}% or more passes.`;
+}
+testMode.addEventListener('change', updateRunMode);
+loopsInput.addEventListener('input', updateRunMode);
+// Shows the count that will actually run once editing is done
+loopsInput.addEventListener('change', () => {
+    loopsInput.value = String(stressLoops());
+    updateRunMode();
+});
 
 function showScreen() {
     const [, view, id] = location.hash.split('/');
@@ -230,6 +273,8 @@ void checkGpu();
 
 // Turns a benchmark progress message into the label of the segment it starts, if it starts one
 function segmentLabel(message: string): string | undefined {
+    const loop = message.match(/^Loop (\d+) of \d+/);
+    if (loop) return `Loop ${loop[1]}`;
     return message.match(/^Testing with (\d+) lights/)?.[1].replace(/\B(?=(\d{3})+$)/g, ',')
         ?? message.match(/^Shot \d+ of \d+ · (.+)$/)?.[1];
 }
@@ -240,14 +285,17 @@ async function openSimulation(benchmark: boolean) {
     controller = new AbortController();
     const signal = controller.signal;
     const scene = selected;
+    const loops = benchmark && stressSelected() ? stressLoops() : 1;
+    // Keeps the display awake during a run: a display that sleeps hides the tab, which invalidates the result
+    let wakeLock: WakeLockSentinel | undefined;
     viewer.showModal();
     element('viewer-title').textContent = scene.name;
-    element('viewer-mode').textContent = benchmark ? 'Benchmark' : 'Preview';
+    element('viewer-mode').textContent = !benchmark ? 'Preview' : loops > 1 ? 'Stress test' : 'Benchmark';
     element('benchmark-progress').textContent = '';
     element('live-metrics').textContent = '';
     element('loading').hidden = false;
     element('loading-message').textContent = `Loading ${scene.name}…`;
-    element('viewer-help').textContent = benchmark ? scene.benchmarkHelp : scene.previewHelp;
+    element('viewer-help').textContent = !benchmark ? scene.previewHelp : loops > 1 ? `Looping ${loops} times · Keep this tab visible · Back to stop` : scene.benchmarkHelp;
     canvas.setAttribute('aria-label', `${scene.name} scene`);
     sparkline.clear();
     try {
@@ -267,13 +315,23 @@ async function openSimulation(benchmark: boolean) {
             element('live-metrics').textContent = `${fps.toFixed(0)} FPS  /  ${frameTime.toFixed(1)} ms` + (gpuTime === undefined ? '' : `  ·  GPU ${gpuTime.toFixed(1)} ms`);
         });
 
-        // Every sample feeds the live graph; during a benchmark they are also kept for the results screen
+        // Every sample feeds the live graph; during a benchmark they are also kept for the results screen. A stress
+        // test keeps one averaged point per quarter second, so even a 100-loop report stays under the upload size limit.
         const samples: FrameSample[] = [];
         const segments: Segment[] = [];
+        const pointSpacingMs = loops > 1 ? 250 : 0;
         let runStart: number | undefined;
+        let point = { startMs: 0, sum: 0, count: 0 };
         session.setSampleCallback(frameTime => {
             sparkline.push(frameTime);
-            if (runStart !== undefined) samples.push({ tMs: performance.now() - runStart, frameTimeMs: frameTime });
+            if (runStart === undefined) return;
+            const tMs = performance.now() - runStart;
+            point.sum += frameTime;
+            point.count++;
+            if (tMs - point.startMs >= pointSpacingMs) {
+                samples.push({ tMs, frameTimeMs: point.sum / point.count });
+                point = { startMs: tMs, sum: 0, count: 0 };
+            }
         });
 
         element('loading').hidden = true;
@@ -281,17 +339,19 @@ async function openSimulation(benchmark: boolean) {
         canvas.focus();
         if (benchmark) {
             const runResolution = resolution.value;
+            wakeLock = await navigator.wakeLock?.request('screen').catch(() => undefined);
             const captured = await session.benchmark(signal, message => {
                 element('benchmark-progress').textContent = message;
                 const label = segmentLabel(message);
-                if (label !== undefined) {
+                // A stress test reports every shot of every loop; the graph marks only where each loop starts
+                if (label !== undefined && label !== segments[segments.length - 1]?.label) {
                     // The clock starts with the first segment, so warm-up isn't part of the graph
                     runStart ??= performance.now();
                     segments.push({ tMs: performance.now() - runStart, label });
                 }
-            });
+            }, loops);
             if (signal.aborted) return;
-            const measurements: RunMeasurements = { scene, resolution: runResolution, finishedAt: new Date(), rows: captured.rows, score: captured.score, samples, segments };
+            const measurements: RunMeasurements = { scene, resolution: runResolution, finishedAt: new Date(), rows: captured.rows, score: captured.score, stress: captured.stress, samples, segments };
             const report = await buildRunReport(measurements, adapter);
             closeViewer();
             // Shown as its JSON round trip, which is exactly what Export JSON saves and an opened file gives back
@@ -304,6 +364,7 @@ async function openSimulation(benchmark: boolean) {
             if (!session) initializing = undefined;
         }
     } finally {
+        void wakeLock?.release().catch(() => {});
         if (!viewer.open) busy = false;
     }
 }
@@ -347,17 +408,25 @@ function msCell(value: number | null): HTMLTableCellElement {
 function renderResults() {
     const { report, file, uploadedId } = shown!;
     const scene = simulations.find(candidate => candidate.id === report.scene.id);
-    const resultLabel = scene?.resultLabel ?? 'Segment';
+    const resultLabel = report.stress ? 'Loop' : scene?.resultLabel ?? 'Segment';
     const back = element<HTMLAnchorElement>('results-back');
     back.href = scene ? `#/scene/${scene.id}` : '#/';
     back.lastChild!.textContent = scene ? 'Back to scene' : 'All simulations';
     element('results-heading').textContent = `${report.scene.name} results`;
     element('result-settings').textContent = `${report.settings.resolution} · ${report.scene.renderer} · ${new Date(report.finishedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}`;
-    element('run-again').hidden = !scene || !(report.settings.resolution in renderResolutions);
+    const { score, stress } = report;
+    element('run-again').hidden = !scene || !(report.settings.resolution in renderResolutions) || (stress !== undefined && !scene.stress);
 
-    const { score } = report;
-    element('score').hidden = !score;
-    if (score) {
+    element('score').hidden = !score && !stress;
+    if (stress) {
+        element('score-label').textContent = `${report.scene.name.toUpperCase()} ${report.settings.resolution.toUpperCase()} STRESS TEST`;
+        // Rounded down, so a run just under the pass mark never shows as reaching it
+        element('score-value').textContent = stress.valid ? `${(Math.floor(stress.stability * 1000 + 1e-6) / 10).toFixed(1)}%` : '—';
+        element('score-detail').textContent = stress.valid
+            ? `frame-rate stability · ${stress.passed ? 'Passed' : 'Did not pass'} · loop scores ${Math.min(...stress.loopScores).toLocaleString()}–${Math.max(...stress.loopScores).toLocaleString()}`
+            : '';
+        element('score-note').textContent = stress.note;
+    } else if (score) {
         element('score-label').textContent = `${report.scene.name.toUpperCase()} ${report.settings.resolution.toUpperCase()} SCORE`;
         element('score-value').textContent = score.valid ? score.value.toLocaleString() : '—';
         element('score-detail').textContent = score.valid ? `${score.averageFps.toFixed(1)} FPS average across shots` : '';
@@ -372,15 +441,22 @@ function renderResults() {
     element('table-title').textContent = `By ${resultLabel.toLowerCase()}`;
     element('result-label').textContent = resultLabel;
     element('result-gpu').hidden = !hasGpuTimes;
-    element('result-rows').replaceChildren(...report.rows.map(row => {
+    element('result-score').hidden = !stress;
+    element('result-rows').replaceChildren(...report.rows.map((row, i) => {
         const tr = document.createElement('tr');
         const label = document.createElement('td');
         label.textContent = row.label;
-        tr.append(label, msCell(row.avgFrameTimeMs), msCell(row.minFrameTimeMs), msCell(row.maxFrameTimeMs));
+        tr.append(label);
+        if (stress) {
+            const loopScore = document.createElement('td');
+            loopScore.textContent = stress.loopScores[i]?.toLocaleString() ?? '—';
+            tr.append(loopScore);
+        }
+        tr.append(msCell(row.avgFrameTimeMs), msCell(row.minFrameTimeMs), msCell(row.maxFrameTimeMs));
         if (hasGpuTimes) tr.append(msCell(row.avgGpuTimeMs));
         return tr;
     }));
-    element('result-note').textContent = scene?.resultNote ?? '';
+    element('result-note').textContent = (stress ? scene?.stress?.resultNote : scene?.resultNote) ?? '';
     renderReport(element('report'), report);
 
     // An opened report can't be uploaded from here; Upload score is for runs measured in this tab
@@ -394,12 +470,18 @@ function renderResults() {
 
 element('run-again').addEventListener('click', () => {
     if (!shown || busy) return;
-    const scene = simulations.find(candidate => candidate.id === shown!.report.scene.id);
-    if (!scene || !(shown.report.settings.resolution in renderResolutions)) return;
-    resolution.value = shown.report.settings.resolution;
+    const { report } = shown;
+    const scene = simulations.find(candidate => candidate.id === report.scene.id);
+    if (!scene || !(report.settings.resolution in renderResolutions)) return;
     location.hash = `#/scene/${scene.id}`;
-    // The hash change selects the scene; start once that has happened
-    setTimeout(() => void openSimulation(true));
+    // The hash change selects the scene; then the run's settings apply and it starts
+    setTimeout(() => {
+        resolution.value = report.settings.resolution;
+        testMode.value = report.stress ? 'stress' : 'benchmark';
+        if (report.stress) loopsInput.value = String(report.stress.loops);
+        updateRunMode();
+        void openSimulation(true);
+    });
 });
 
 // Saves the report exactly as the results screen prints it; Open report reads it back

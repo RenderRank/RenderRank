@@ -51,7 +51,7 @@ The late-October alpha milestone in the README isn't reachable from the current 
 | Result screen, online compare | Score, per-test FPS, frame-time chart, "faster than X% of <GPU> results" | ✅ |
 | Hall of Fame / search | Leaderboard grouped by GPU model, browser, and OS, using medians | ✅ basic |
 | Hardware monitoring (temperature, clocks, timeline charts) | Compute Pressure states, a measured GPU clock probe, repeat drift, and memory and power context. Real temperatures and clocks come from opt-in imported sensor logs ([§10](#10-system-telemetry-beyond-webgpu)). | ✅ partial (log import in spring) |
-| Stress test (20 loops, stability %) | Loop GT1, report frame-rate stability = min loop FPS / max loop FPS | Stretch |
+| Stress test (20 loops, stability %) | Loop the test, report frame-rate stability = min loop FPS / max loop FPS, pass at 97% | ✅ built for the Orrery (loop count adjustable, default 20); thermal timeline still planned |
 | Feature tests (API overhead, ray tracing…) | Draw-call throughput test, compute test, lighting-technique comparison | Spring |
 | CPU / physics test | WASM physics in Web Workers | Spring |
 | Demo mode | Unscored cinematic playback of the camera paths | Spring |
@@ -68,7 +68,7 @@ What we can build on:
 - GPU light clustering ([cluster_bounds.cs.wgsl](../src/shaders/cluster_bounds.cs.wgsl), [light_culling.cs.wgsl](../src/shaders/light_culling.cs.wgsl), [light_assignment.cs.wgsl](../src/shaders/light_assignment.cs.wgsl)) and GPU light animation ([move_lights.cs.wgsl](../src/shaders/move_lights.cs.wgsl)).
 - A glTF loader and scene graph ([scene.ts](../src/stage/scene.ts)), Sponza (262k triangles, 103 primitives, 25 materials, 69 textures, 51 MB on disk).
 - A light-count sweep benchmark for Sponza ([benchmark.ts](../src/testing/benchmark.ts)).
-- **The Orrery**, a procedural test scene with no meshes or textures. It is one SDF ray-marching fragment shader ([orrery.fs.wgsl](../src/shaders/orrery.fs.wgsl)) with soft shadows from two lights, AO, one reflection bounce and a shadowed volumetric sun shaft. A fixed 40-second, four-shot camera timeline drives it ([orrery_timeline.ts](../src/procedural/orrery_timeline.ts)). Its benchmark is the §3.1 throughput loop, with a harmonic-mean score ([orrery_session.ts](../src/procedural/orrery_session.ts)).
+- **The Orrery**, a procedural test scene with no meshes or textures. It is one SDF ray-marching fragment shader ([orrery.fs.wgsl](../src/shaders/orrery.fs.wgsl)) with soft shadows from two lights, AO, one reflection bounce and a shadowed volumetric sun shaft. A fixed 40-second, four-shot camera timeline drives it ([orrery_timeline.ts](../src/procedural/orrery_timeline.ts)). Its benchmark is the §3.1 throughput loop, with a harmonic-mean score ([orrery_session.ts](../src/procedural/orrery_session.ts)). Its **stress test** repeats that loop back to back (20 times by default, 2–100 allowed) after one warm-up, scores each loop, and reports frame-rate stability (lowest loop score ÷ highest, pass at 97%).
 - A three-screen frontend in plain TypeScript, with hash routes `#/`, `#/scene/<id>` and `#/results` ([main.ts](../src/main.ts)). It has:
   - a live frame-time sparkline in the viewer, with dashed lines at the 120, 60 and 30 FPS frame times, labeled in ms;
   - a full-run frame-time chart with per-segment markers and the same reference lines on the results screen ([frame_chart.ts](../src/ui/frame_chart.ts));
@@ -765,7 +765,7 @@ The measurement core (§3), results and history, and submission are **not** on t
 
 ## 13. Roadmap after December
 
-- **Stress test:** 20 loops of GT1, frame-rate stability %, pass/fail at 97%. The thermal timeline chart comes from Compute Pressure plus a clock probe between loops, with imported sensor logs overlaid when present.
+- **Stress test:** the Orrery version is built (loops, stability %, pass/fail at 97%). Still to add: the same for GT1, and a thermal timeline chart from Compute Pressure plus a clock probe between loops, with imported sensor logs overlaid when present.
 - **Sensor-log import** ([§10.3](#103-opt-in-ground-truth)): parsers for nvidia-smi, HWiNFO, Afterburner, and powermetrics, aligned to the run timeline and charted on the results page.
 - **Native sensor helper:** evaluate only if log import proves popular. It stays strictly optional.
 - **Feature tests:** draw-call throughput (API overhead equivalent), compute bandwidth, and a lighting-technique comparison. That one would bring the naive and Forward+ renderers back from git history.

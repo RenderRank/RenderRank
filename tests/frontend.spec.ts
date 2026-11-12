@@ -207,6 +207,48 @@ test('Orrery benchmark shows a score and graph, exports, uploads, and reopens fr
     await page.locator('#report-file').setInputFiles({ name: 'notes.json', mimeType: 'application/json', buffer: Buffer.from('{"hello": 1}') });
     await expect(page.locator('#open-report-status')).toContainText('Couldn’t open notes.json');
     await expect(page.locator('#view-library')).toBeVisible();
+
+    // A stress test report shows stability and one row per loop. A real one takes minutes, so this one is built
+    // from the run above.
+    const stressReport = {
+        ...shown,
+        score: null,
+        stress: { loops: 2, loopScores: [10000, 9850], stability: 0.985, threshold: 0.97, passed: true, valid: true, note: 'Stress note' },
+        rows: [{ ...shown.rows[0], label: 'Loop 1' }, { ...shown.rows[1], label: 'Loop 2' }],
+    };
+    await page.locator('#report-file').setInputFiles({ name: 'stress.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(stressReport)) });
+    await expect(page.locator('#score-label')).toHaveText('ORRERY 1080P STRESS TEST');
+    await expect(page.locator('#score-value')).toHaveText('98.5%');
+    await expect(page.locator('#score-detail')).toContainText('Passed');
+    await expect(page.locator('#table-title')).toHaveText('By loop');
+    await expect(page.locator('#result-score')).toBeVisible();
+    await expect(page.locator('#result-rows tr').first().locator('td').nth(1)).toHaveText('10,000');
+});
+
+test('Orrery stress test takes a loop count and can be stopped', async ({ page }) => {
+    await page.goto('/#/scene/orrery');
+    await expect(page.locator('#gpu-status')).toContainText('WebGPU ready');
+    const loops = page.getByLabel('Loops', { exact: true });
+    await expect(loops).toBeHidden();
+    await page.getByLabel('Test', { exact: true }).selectOption('stress');
+    await expect(loops).toHaveValue('20');
+    await expect(page.locator('#run-note')).toContainText('20 times');
+    // Out-of-range counts are pulled back into range
+    await loops.fill('500');
+    await loops.blur();
+    await expect(loops).toHaveValue('100');
+    await loops.fill('2');
+    await expect(page.locator('#run-note')).toContainText('2 times back to back, which takes 80 seconds');
+    await page.getByRole('button', { name: 'Run stress test' }).click();
+    await expect(page.locator('#viewer-mode')).toHaveText('Stress test');
+    await expect(page.locator('#benchmark-progress')).toContainText('Loop 1 of 2', { timeout: 30_000 });
+    await page.getByRole('button', { name: 'Back', exact: true }).click();
+    await expect(page.locator('#viewer')).toBeHidden();
+    await expect(sceneNav(page, 'Results')).toBeHidden();
+    // Sponza's benchmark is display-paced, so it has no stress test
+    await sceneNav(page, 'Sponza').click();
+    await expect(page.getByLabel('Test', { exact: true })).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Run benchmark' })).toBeVisible();
 });
 
 test('Sign in with Google shows the account, survives a reload, and signs out', async ({ page }, testInfo) => {

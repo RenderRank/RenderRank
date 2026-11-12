@@ -17,7 +17,19 @@ interface SimulationBase {
     benchmarkHelp: string;
     resultLabel: string; // first column of the results table
     resultNote: string;  // how to read the numbers
+    // A stress test option: the benchmark looped back to back, reported as frame-rate stability. Only for scenes
+    // whose benchmark measures uncapped throughput; a display-paced one would always look stable.
+    stress?: {
+        defaultLoops: number; // the loop count field starts here; people can change it
+        loopSeconds: number;  // length of one loop, for the time estimate
+        resultNote: string;   // how to read the per-loop table
+    };
 }
+
+// Loop counts the stress test accepts, and the stability it needs to pass: the lowest loop score must be at least this
+// fraction of the highest
+export const stressLoopRange = { min: 2, max: 100 };
+export const stabilityPassMark = 0.97;
 
 // A glTF scene drawn by the clustered deferred renderer, with a free camera and a light-count sweep
 export interface GltfSimulation extends SimulationBase {
@@ -49,6 +61,11 @@ export const simulations: Simulation[] = [{
     benchmarkHelp: 'Playing 4 shots · Keep this tab visible · Back to stop',
     resultLabel: 'Shot',
     resultNote: 'Frame times are from uncapped offscreen rendering; Min. and Max. are the best and worst quarter-second averages. GPU pass times, where shown, come from browser timestamp queries, which the browser rounds. Scores are not yet ranked against other devices.',
+    stress: {
+        defaultLoops: 20,
+        loopSeconds: 40, // timelineDuration in src/procedural/orrery_timeline.ts
+        resultNote: 'Each loop plays the whole camera path. A loop’s score is computed as in the benchmark, and its average frame time is the mean of its four shots’ averages; Min. and Max. are the best and worst quarter-second averages in the loop. GPU pass times, where shown, come from browser timestamp queries.',
+    },
     kind: 'procedural',
 }, {
     id: 'sponza',

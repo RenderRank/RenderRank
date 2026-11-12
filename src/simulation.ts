@@ -20,7 +20,8 @@ export interface SimulationSession {
     // Frame times in ms as they happen, for graphs. One call per frame, or per short window when frames aren't
     // display-paced.
     setSampleCallback(callback: ((frameTime: number) => void) | null): void;
-    benchmark(signal: AbortSignal, progress: (message: string) => void): Promise<BenchmarkRun>;
+    // More than one loop runs a stress test. Only scenes with `stress` in their catalog entry support it.
+    benchmark(signal: AbortSignal, progress: (message: string) => void, loops?: number): Promise<BenchmarkRun>;
     isBenchmarkRunning(): boolean;
 }
 

@@ -216,3 +216,8 @@ main > .compatibility { margin: 0 0 24px; }
 .open-report p { margin: 7px 0 0; font-size: 12px; line-height: 1.6; color: #91939b; }
 .open-report .open-report-status { flex-basis: 100%; margin: 0; color: #e8a08f; overflow-wrap: anywhere; }
 @media (max-width: 600px) { .open-report { padding: 18px 20px; } .open-report p { font-size: 11px; } }
+
+/* Scene setup: benchmark or stress test */
+#test-settings { margin-top: 25px; }
+#loop-settings { margin-top: 25px; }
+.number-input { display: block; margin-top: 10px; border: 1px solid #36383e; border-radius: 6px; background: #202125; color: #dedee1; width: 100%; padding: 12px 10px; font-size: 12px; font-variant-numeric: tabular-nums; }

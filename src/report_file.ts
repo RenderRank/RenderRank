@@ -31,6 +31,8 @@ function checkReport(data: JsonObject) {
     need(allValues(data.workload, isNumber), 'workload');
     const score = data.score;
     need(score === null || (isObject(score) && isNumber(score.value) && isNumber(score.averageFps) && isBoolean(score.valid) && isString(score.note)), 'score');
+    need(optional(data.stress, stress => isObject(stress) && isNumber(stress.loops) && all(stress.loopScores, isNumber) && (stress.loopScores as unknown[]).length > 0 && isNumber(stress.stability)
+        && isNumber(stress.threshold) && isBoolean(stress.passed) && isBoolean(stress.valid) && isString(stress.note)), 'stress');
     need(all(data.rows, row => isObject(row) && isString(row.label) && isNumberOrNull(row.numLights) && isNumberOrNull(row.avgFrameTimeMs)
         && isNumberOrNull(row.minFrameTimeMs) && isNumberOrNull(row.maxFrameTimeMs) && isNumberOrNull(row.avgGpuTimeMs)), 'rows');
     need(all(data.segments, segment => isObject(segment) && isNumber(segment.tMs) && isString(segment.label)), 'segments');
@@ -80,5 +82,6 @@ export function parseRunReport(text: string): { report: RunReport; uploadedId?: 
 // Named after the run, so saving the same report twice gives the same name
 export function reportFileName(report: RunReport): string {
     const safe = (text: string) => text.replace(/[^\w-]+/g, '-');
-    return `renderrank-${safe(report.scene.id)}-${safe(report.settings.resolution)}-${safe(report.finishedAt.replace(/\.\d+Z$/, 'Z'))}.json`;
+    const test = report.stress ? '-stress' : '';
+    return `renderrank-${safe(report.scene.id)}-${safe(report.settings.resolution)}${test}-${safe(report.finishedAt.replace(/\.\d+Z$/, 'Z'))}.json`;
 }

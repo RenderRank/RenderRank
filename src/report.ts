@@ -5,7 +5,7 @@ import type { DeviceReport } from './device';
 import { constants as shaderConstants } from './shaders/shaders';
 import { renderResolutions } from './simulations';
 import type { Simulation } from './simulations';
-import type { BenchmarkResult, BenchmarkScore } from './testing/benchmark';
+import type { BenchmarkResult, BenchmarkScore, StressResult } from './testing/benchmark';
 import type { FrameSample, Segment } from './ui/frame_chart';
 
 export interface RunReport {
@@ -17,6 +17,8 @@ export interface RunReport {
     // The constants that define the workload, so results from different versions can be told apart
     workload: Record<string, number>;
     score: BenchmarkScore | null;
+    // Only in stress tests, where `rows` has one entry per loop and `score` is null. Older reports don't have it.
+    stress?: StressResult;
     rows: {
         label: string;
         numLights: number | null;
@@ -37,6 +39,7 @@ export interface RunMeasurements {
     finishedAt: Date;
     rows: BenchmarkResult[];
     score?: BenchmarkScore;
+    stress?: StressResult;
     samples: FrameSample[];
     segments: Segment[];
 }
@@ -55,6 +58,7 @@ export async function buildRunReport(run: RunMeasurements, adapter?: GPUAdapter)
         settings: { resolution: run.resolution, ...renderResolutions[run.resolution] },
         workload: { ...shaderConstants },
         score: run.score ?? null,
+        stress: run.stress && { ...run.stress, stability: Number(run.stress.stability.toFixed(4)) },
         rows: run.rows.map(row => ({
             label: row.label,
             numLights: row.numLights ?? null,

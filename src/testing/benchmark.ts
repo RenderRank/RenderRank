@@ -18,9 +18,22 @@ export interface BenchmarkScore {
     note: string;
 }
 
+// A stress test: the benchmark played several times back to back. Stability is the slowest loop's frame rate as a
+// fraction of the fastest loop's; a run passes at `threshold` or above.
+export interface StressResult {
+    loops: number;
+    loopScores: number[];  // each loop's score, computed as for a single benchmark run
+    stability: number;     // 0–1
+    threshold: number;
+    passed: boolean;
+    valid: boolean;
+    note: string;
+}
+
 export interface BenchmarkRun {
-    rows: BenchmarkResult[];
+    rows: BenchmarkResult[];  // one per light count or shot; one per loop in a stress test
     score?: BenchmarkScore;
+    stress?: StressResult;
 }
 
 export class BenchmarkRunner {

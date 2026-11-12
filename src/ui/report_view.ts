@@ -84,6 +84,7 @@ export function renderReport(container: HTMLElement, report: RunReport) {
     grid.append(card('Run', definitionList([
         ['Finished', new Date(report.finishedAt).toLocaleString()],
         ['Scene', `${report.scene.name} (${report.scene.id}, ${report.scene.kind})`],
+        ['Test', report.stress ? `Stress test · ${report.stress.loops} loops` : 'Benchmark'],
         ['Renderer', report.scene.renderer],
         ['Resolution', `${report.settings.resolution} · ${report.settings.width} × ${report.settings.height}`],
         ['Frame-time samples', report.frameTimes.tMs.length],
