@@ -2,11 +2,22 @@
 
 *Drafted 2026-10-25. Covers the work from now to the early-December semester deliverable, plus a roadmap for later.*
 
-*Status updated 2026-11-03: the simulation library, Sponza preview/settings, device details, cancellable light-count benchmark, results table, and CSV export are implemented. Scene registration is documented in [AGENTS.md](../AGENTS.md). Scoring, a deterministic throughput protocol, persistent history, and the leaderboard remain planned.*
+*Status updated 2026-11-12 (`main` at `4c51040`). In place:*
+
+- *Two scenes: Sponza (clustered deferred, display-paced light sweep) and the procedural **Orrery**. The Orrery has a fixed 40-second camera path, an uncapped throughput benchmark and a score.*
+- *A three-screen frontend (library, scene setup, results) with live and full-run frame-time graphs, JSON export of the full run report (which the library can open again), and **Upload score**, which saves runs as JSON on the VPS.*
+- *Optional Sign in with Google (PR #3).*
+
+*Measured results from four devices are in [§2.1](#21-measured-so-far).*
+
+*Still planned:*
+
+- *Repeats and variance, per-tier presets, the workload hash, server-side validation, persistent history and the leaderboard.*
+- *The Sponza-based Atrium v1 tests (GT1/GT2).*
 
 ## Summary
 
-RenderRank has a working WebGPU clustered renderer drawing Sponza with up to 5,000 lights and a simulation-selection frontend. The product we want is a **benchmark**: fixed tests, a fixed protocol, one score, and a place to compare results. The measurement layer and backend still need to be built.
+RenderRank has a working WebGPU clustered renderer drawing Sponza with up to 5,000 lights, a procedural ray-marched scene (the Orrery) with an uncapped, scored benchmark, and a three-screen frontend that can upload results to the server. The product we want is a **benchmark**: fixed tests, a fixed protocol, one score, and a place to compare results. The throughput loop and a first score exist for the Orrery. The rest of the measurement protocol (repeats, variance, flags) and a real backend still need to be built.
 
 The plan has four pillars:
 
@@ -56,25 +67,58 @@ What we can build on:
 - A clustered deferred renderer ([src/renderers/](../src/renderers/)). The original naive and Forward+ renderers were removed because no test uses them; git history has them.
 - GPU light clustering ([cluster_bounds.cs.wgsl](../src/shaders/cluster_bounds.cs.wgsl), [light_culling.cs.wgsl](../src/shaders/light_culling.cs.wgsl), [light_assignment.cs.wgsl](../src/shaders/light_assignment.cs.wgsl)) and GPU light animation ([move_lights.cs.wgsl](../src/shaders/move_lights.cs.wgsl)).
 - A glTF loader and scene graph ([scene.ts](../src/stage/scene.ts)), Sponza (262k triangles, 103 primitives, 25 materials, 69 textures, 51 MB on disk).
-- A light-count sweep benchmark with CSV export ([benchmark.ts](../src/testing/benchmark.ts)).
-- A responsive scene library, lazy-loaded viewer, browser-reported GPU/system details, cancellation, and results table ([main.ts](../src/main.ts), [simulation.ts](../src/simulation.ts), [device.ts](../src/device.ts)).
-- Vite build plus a GitHub Pages workflow.
+- A light-count sweep benchmark for Sponza ([benchmark.ts](../src/testing/benchmark.ts)).
+- **The Orrery**, a procedural test scene with no meshes or textures. It is one SDF ray-marching fragment shader ([orrery.fs.wgsl](../src/shaders/orrery.fs.wgsl)) with soft shadows from two lights, AO, one reflection bounce and a shadowed volumetric sun shaft. A fixed 40-second, four-shot camera timeline drives it ([orrery_timeline.ts](../src/procedural/orrery_timeline.ts)). Its benchmark is the §3.1 throughput loop, with a harmonic-mean score ([orrery_session.ts](../src/procedural/orrery_session.ts)).
+- A three-screen frontend in plain TypeScript, with hash routes `#/`, `#/scene/<id>` and `#/results` ([main.ts](../src/main.ts)). It has:
+  - a live frame-time sparkline in the viewer, with dashed lines at the 120, 60 and 30 FPS frame times, labeled in ms;
+  - a full-run frame-time chart with per-segment markers and the same reference lines on the results screen ([frame_chart.ts](../src/ui/frame_chart.ts));
+  - the full run report on the results screen, which is exactly what Upload score sends ([report.ts](../src/report.ts), [report_view.ts](../src/ui/report_view.ts));
+  - **Export JSON**, which saves the run report exactly as printed, and **Open report** on the library screen, which shows a saved report (or a file from `results/`) exactly as it looked when the run finished ([report_file.ts](../src/report_file.ts));
+  - **Upload score** ([results-api.ts](../scripts/results-api.ts)).
+- A device report attached to uploads: WebGPU adapter info, features and limits; WebGL renderer string; UA Client Hints; device memory; screen; battery ([device.ts](../src/device.ts)).
+- Optional Sign in with Google, entirely in the browser ([auth.ts](../src/auth.ts), [doc/auth.md](auth.md)).
+- Vite build plus a GitHub Pages workflow. The live site is still the Vite dev server on this VPS.
 
 The gaps that matter for a benchmark:
 
 | Area | Current state | Why it matters |
 | --- | --- | --- |
-| **Vsync cap** | Frame time is the interval between `requestAnimationFrame` callbacks ([display_driver.ts:41-60](../src/drivers/display_driver.ts#L41-L60)). In [img/benchmark_rtx5080.csv](../img/benchmark_rtx5080.csv), Forward+ and clustered deferred both floor at 8.33 ms (120 Hz) and step at 16.7/25/33 ms. | We're measuring the display, not the GPU. Every fast result collapses to the refresh rate. **This is the #1 blocker.** |
+| **Vsync cap** | **Solved for the Orrery, not for Sponza.** The Orrery benchmark renders offscreen back to back (§3.1) and reached 178 FPS at 1080p on an RTX 5080 with a 120 Hz display. Sponza still times `requestAnimationFrame` intervals ([display_driver.ts](../src/drivers/display_driver.ts)), and in [img/benchmark_rtx5080.csv](../img/benchmark_rtx5080.csv) it floors at 8.33 ms (120 Hz). | Sponza's numbers still measure the display on fast GPUs, so it has no score. Moving it onto the throughput loop needs its light motion tied to a timeline. |
 | **Resolution** | Fixed in §6.2. Frames render offscreen at 1080p, 1440p, or 2160p, picked in the GUI ([main.ts](../src/main.ts)), and are letterboxed onto the canvas, which follows window resizes. Switching rebuilds the renderer's targets. | Tier presets (§3.2) should select these instead of the GUI. The old benchmark CSV doesn't record the resolution. |
-| **Determinism** | Light colors use `Math.random()` ([lights.ts:204](../src/stage/lights.ts#L204)). Light motion is driven by wall-clock rAF time ([lights.ts:233-234](../src/stage/lights.ts#L233-L234)). The camera is keyboard/mouse only ([camera.ts:134](../src/stage/camera.ts#L134)). | The workload differs from run to run. |
-| **Protocol** | 30 warm-up frames, 120 sample frames, one pass, min/avg/max only ([benchmark.ts:86-92](../src/testing/benchmark.ts#L86-L92)). Pipelines compile synchronously when the renderer is constructed. | Too short to be stable. No percentiles or variance. Shader-compile hitches land in the measured window. |
+| **Determinism** | **Orrery:** camera and mechanism are pure functions of timeline time, with no randomness. **Sponza:** light colors use `Math.random()` ([lights.ts:204](../src/stage/lights.ts#L204)), light motion follows wall-clock rAF time ([lights.ts:233-234](../src/stage/lights.ts#L233-L234)), and the camera is keyboard/mouse only. | Sponza's workload still differs from run to run. |
+| **Protocol** | **Sponza:** 30 warm-up frames and 120 sample frames per light count, one pass, min/avg/max ([benchmark.ts](../src/testing/benchmark.ts)). **Orrery:** 30 warm-up frames at t = 0, then one 40 s pass. It reports per-shot average, best and worst quarter-second frame time, and GPU pass time, plus a score that is invalid if the tab was hidden. Neither scene repeats or reports variance, and pipelines still compile synchronously. | Two 2160p Orrery runs on the same RTX 5080 scored 8% apart (§2.1), far outside the ≤2% target. Repeats, a longer warm-up and a CV check (§3.4) are the next measurement work. |
 | **Architecture** | Fixed in §6.1–6.2. `GpuContext` replaced the module-level globals. Renderers only encode frames, and a `DisplayDriver` ([display_driver.ts](../src/drivers/display_driver.ts)) owns the rAF loop. | The uncapped throughput driver (§3.1) still needs building on top. |
 | **Materials** | Fixed in §6.3–6.4. Textures are sRGB-correct and mipmapped. Lighting is HDR with an ACES tonemap and metallic-roughness PBR. Normal maps, glTF factors, and alpha modes are used. | There's no ambient or environment light yet, so unlit metal reads as black. |
 | **Clustering cost** | Fixed in §6.6. Clustering now runs as frustum culling, then shared-memory batched assignment into a compact 8 MB index list. It has no large private arrays. Light radius and cluster dimensions are still compile-time constants ([shaders.ts](../src/shaders/shaders.ts)). | Light radius can't change per preset yet (week 2). |
 | **Clustered deferred G-buffer** | Fixed in §6.5. Position is rebuilt from `depth32float`. The G-buffer is two packed 4-byte targets ([clustered_deferred.ts](../src/renderers/clustered_deferred.ts)). | — |
-| **Product** | Simulation library at the root, Sponza settings/preview, actual device details, cancellable benchmark, results table, and manual CSV export. | Persistent history, ranked scores, and leaderboard remain planned. |
-| **Build hygiene** | Existing TypeScript errors are fixed. `npm run build` type-checks, bundles, and copies assets with a portable Node script. Five Playwright checks cover the UI and WebGPU flow. | Browser integration checks require WebGPU; the Pages build runs TypeScript validation. |
-| **Hosting** | GitHub Pages can't set response headers. [vite.config.ts](../vite.config.ts) allows `renderrank.tonyxtian.com` as a *dev-server* host. | We need COOP/COEP headers (finer timers) and a real production host, not `vite dev`. |
+| **Product** | Three screens: library, per-scene setup, and results. Results show the score (Orrery), a full-run frame-time chart, a per-segment table, the full run report, Export JSON, and Upload score; the library opens saved reports. There is a live sparkline in the viewer and optional Google sign-in. | History, comparison, the leaderboard and pre-flight checks remain planned. Results last until reload unless exported or uploaded; there is no saved history in the page yet. |
+| **Build hygiene** | `npm run build` type-checks, bundles, and copies assets with a portable Node script. Eleven Playwright checks cover the library, setup, mobile layout, unsupported browsers, preview, both benchmarks, upload (mocked), and sign-in (fake Google script). | Browser checks need WebGPU. The Pages build only runs TypeScript validation. |
+| **Hosting and storage** | The live site is `vite dev` on this VPS, running since Oct 9, with no COOP/COEP headers (every upload reports `crossOriginIsolated: false`). Uploads go to a dev-server middleware that writes JSON to `results/` (gitignored). GitHub Pages builds have no upload endpoint. | Sign-in needs `VITE_GOOGLE_CLIENT_ID` at server start, which the live server doesn't have, so Sign in is hidden there. A production host with headers and a real API (§9.1) is still needed. |
+
+### 2.1 Measured so far
+
+Uploaded runs as of 2026-11-12. The files are in `results/` on the VPS. Every run used the same workload constants and Chrome.
+
+| Device (as reported) | OS | Scene, resolution | Result |
+| --- | --- | --- | --- |
+| NVIDIA GeForce RTX 5080 | Windows (`platformVersion` 19.0.0) | Orrery, 2160p | Score **4,675** (46.7 FPS) and **5,051** (50.5 FPS) on two runs |
+| NVIDIA GeForce RTX 5080 | Windows | Orrery, 1080p | Score **17,785** (177.8 FPS) |
+| Apple M5 Max | macOS 27.3, on battery (86%) | Orrery, 1080p | Score **6,825** (68.3 FPS) |
+| iPhone (GPU reported only as `apple`) | iOS, Chrome 157 | Orrery, 1080p | Score **1,152** (11.5 FPS) |
+| Apple M1 | macOS 14.3.1 | Sponza, 1080p | 13.1 ms at 500 lights, rising roughly linearly to 95.9 ms at 5,000 |
+
+What these show:
+
+- **The throughput loop escapes vsync.** This is confirmed on Chrome/Windows only, where 177.8 FPS ran on a 120 Hz display. The other devices ran below their refresh rate, so they don't test it. Safari, Firefox and Android remain unverified (§3.1).
+- **Repeatability isn't there yet.** The two 2160p RTX 5080 runs are 8% apart. Two runs aren't a CV, but the gap is four times the §11 target, so repeats and warm-up length (§3.4) come first.
+- **The score spreads about 15× across devices** (iPhone 1,152 to RTX 5080 17,785 at 1080p). The Orrery at 1080p already spans phone to desktop, so it can serve as a cross-platform test while tiers are worked out.
+- **GPU pass time is a throughput measure only on the NVIDIA GPU.** There it is within about 4% of the frame interval. On Apple GPUs the pass time exceeds the frame interval: by 2–6% per shot on the M5 Max and by about 30% on the iPhone. That is likely because tile-based GPUs overlap consecutive frames. This supports keeping timestamps diagnostic-only (§3.6).
+- **Device identification varies by platform, as §9.5 expected.**
+  - Windows Chrome gives the full model with a PCI ID and backend suffix (`NVIDIA GeForce RTX 5080 (0x00002C02) Direct3D11 vs_5_0 ps_5_0`), which a normalization table must clean up.
+  - macOS Chrome gives `Apple M5 Max` / `Apple M1`.
+  - The iPhone gives only `apple`.
+- **`navigator.deviceMemory` isn't clamped at 8 on desktop Chrome.** It reported 32 and 16, which answers the open question in §10.1.
+- **The M5 Max ran on battery.** The planned `on-battery` warning (§3.5) would have flagged this.
 
 ---
 
@@ -110,6 +154,8 @@ async function measure(test: GraphicsTest, timeline: Timeline, maxInFlight = 2):
   return { frames, elapsedMs, fps: frames / (elapsedMs / 1000), frameIntervalsMs: diffs(completions) };
 }
 ```
+
+**Status:** implemented for the Orrery as `runThroughput` in [orrery_session.ts](../src/procedural/orrery_session.ts), as sketched above. A rAF callback only raises the present flag. Frame-time samples are taken over 50 ms windows for the chart, and over 250 ms windows for best and worst per shot. It is verified uncapped on Chrome/Windows (§2.1). The other platforms below are still unchecked.
 
 **Week-1 spike:** confirm this really is uncapped on Chrome/Edge (Windows, macOS, Android), Safari, and Firefox. Run GT1-Light on a fast dGPU and check that FPS goes well above the refresh rate. Also confirm that rAF still fires during the loop. If some browser still couples to the display, we fall back to making each tier heavy enough to stay below 60 FPS on its target hardware, and we flag results within 3% of a refresh-rate multiple as `display-limited`.
 
@@ -160,6 +206,7 @@ Request the adapter with `powerPreference: 'high-performance'` so dual-GPU lapto
 
 - `performance.now()` is coarsened (100 µs or worse) unless the page is **cross-origin isolated**, which needs COOP/COEP response headers. Throughput over 30 s is fine at any resolution. Frame-interval percentiles need isolation to be meaningful, which is one reason to move hosting (see [§9.1](#91-stack)).
 - Request `timestamp-query` when the adapter offers it, and record **per-pass GPU time** (clustering, G-buffer, lighting, shadows, post). Values are quantized by the browser, so they're **diagnostics only**: shown as a breakdown chart, never used in the score.
+- **Status:** `GpuContext` requests the feature. The Orrery times its single ray-march pass, with one readback in flight and other frames skipped, and shows the result in the viewer and the results table. Every device in §2.1 exposed `timestamp-query`. Sponza's passes aren't timed yet (§6 item 9).
 
 ### 3.7 Scoring
 
@@ -170,6 +217,13 @@ GraphicsScore = C_tier × ( Σ wᵢ ) / ( Σ wᵢ / FPSᵢ )
 ```
 
 We use the harmonic mean because it weighs each test by the time it takes, so a GPU can't hide a weak test behind a strong one. That's also how 3DMark combines tests. `C_tier` is chosen once, at the workload freeze, so a reference device scores a round number (for example 10,000 on Standard). It never changes within a suite major version.
+
+**Status:** the Orrery uses this formula with its four 10-second shots as equal-weight tests.
+
+- Each shot's FPS is frames completed ÷ the shot's fixed length.
+- `C` is a provisional 100 per FPS, not yet calibrated against a reference device.
+- A score is marked invalid if the tab was hidden or any shot finished no frames.
+- There are no repeats, and nothing records the score's version. Until §3.8 exists, scores compare only within the same code and resolution.
 
 ### 3.8 Versioning and the workload hash
 
@@ -183,6 +237,17 @@ Renderer optimizations (like the clustering rewrite) change scores, so they must
 ---
 
 ## 4. Test suite: *Atrium v1*
+
+**Status:** GT1 and GT2 below are not built yet. Shadows, crowds, SSAO, bloom, tiers and camera paths in Sponza are all still to do.
+
+The first scored test is instead the **Orrery** (§2), a procedural SDF scene. Its load is almost entirely fragment arithmetic, so it scales with pixel count, and it needs no asset download. Its four shots stress different things:
+
+- **Approach:** long rays through the hall.
+- **Floor skim:** mostly mirror reflections.
+- **Mechanism:** dense metal shading up close.
+- **Ascent:** a view down the volumetric sun shaft.
+
+That makes it a good complement to GT1/GT2, which are raster, geometry- and bandwidth-heavy. A natural suite v1 is *Orrery + GT1*.
 
 Both tests use Sponza for v1, which keeps asset work manageable. They stress different parts of the GPU.
 
@@ -296,7 +361,7 @@ Ordered so everything that changes the workload lands before the freeze.
    - The order of lights within a cluster now depends on atomics, so float summation order can vary frame to frame by about 1 LSB. Probe-hash tolerance (item 10) has to allow for that.
 7. **Shadows.** Cascaded shadow map for the sun (GT1).
 8. **GT2 pipeline** (with Stan). VAT instanced characters, compute culling and LOD into an indirect buffer, SSAO, bloom.
-9. **Diagnostics.** Per-pass timestamp queries resolved into a ring of readback buffers, so we never stall the GPU.
+9. **Diagnostics.** Per-pass timestamp queries resolved into a ring of readback buffers, so we never stall the GPU. *Partly done: the Orrery times its one pass (§3.6). Sponza's clustering, G-buffer and lighting passes aren't timed yet.*
 10. **Probe frames.** Low-resolution render, readback, and a perceptual hash (dHash on luminance) for each probe point.
 
 ---
@@ -312,6 +377,23 @@ Ordered so everything that changes the workload lands before the freeze.
 ---
 
 ## 8. Frontend and UX
+
+**Status:** built in plain TypeScript with no UI framework (open decision 3, settled). The routes are:
+
+| Route | What it does |
+| --- | --- |
+| `#/` | Scene library, and Open report for a saved run report (button or file drop) |
+| `#/scene/<id>` | The scene's description and specs, render resolution, light count (Sponza only), Preview, Run benchmark, and a link to the last result |
+| `#/results` | Score, full-run frame-time chart with hover readout and segment markers, per-segment table, the full run report (readable groups plus the exact upload JSON), Run again, Export JSON, Upload score (hidden for an opened file) |
+
+- The library lists the Orrery first, then Sponza; the catalog order in [simulations.ts](../src/simulations.ts) sets it.
+- The viewer dialog shows a live frame-time sparkline beside the FPS readout, titled Frame time, with reference lines labeled 8.3, 16.7 and 33.3 ms.
+- The sidebar shows the detected device and links to each scene, plus Results once a run exists.
+- A Sign in panel sits in the top bar when accounts are configured.
+
+Not built yet: tiers and Ranked/Custom modes, pre-flight checks, history and compare, the leaderboard, a flags explanation, share links, and showing the upload payload before sending (§9.5).
+
+The target routes below still describe the end state:
 
 Routes (hash routing, so the static host needs no rewrite rules):
 
@@ -332,6 +414,18 @@ Routes (hash routing, so the static host needs no rewrite rules):
 ---
 
 ## 9. Backend, leaderboard, and validation
+
+**Status: an interim store on the VPS, not the planned backend.**
+
+- **Upload.** **Upload score** posts the finished run to `POST /api/results`. That endpoint is middleware in the Vite dev/preview server ([results-api.ts](../scripts/results-api.ts)), and it writes one JSON file per run to `results/`, which is gitignored.
+  - **Abuse limits:** the dev server is internet-facing, so it caps the body at 512 KB, accepts only this site's origins, allows 20 uploads per client per 10 minutes, stops at 5,000 files, and picks file names itself.
+  - **Payload:** scene, resolution, the shader workload constants, score, per-segment rows, the full frame-time series, segment markers, and the device report (§10). It stores no IP address. The report is built once when the run ends, shown in full on the results screen, and sent unchanged.
+- **Not built yet:** schema validation beyond a basic shape check, score recomputation, the workload hash, plausibility checks, reads, and aggregation. GitHub Pages builds have no endpoint, and the page says so.
+- **Accounts.** Sign in with Google landed in PR #3 ([auth.ts](../src/auth.ts), [doc/auth.md](auth.md)). It uses Google Identity Services in the browser, and the ID token is kept in `localStorage`.
+  - **Checks:** the page checks `aud`, `iss`, expiry and a verified email, but not the signature, so any API must verify the token itself.
+  - **Uploads:** they don't carry the account yet.
+  - **Configuration:** accounts are off unless `VITE_GOOGLE_CLIENT_ID` is set when the server starts. The live dev server doesn't have it, so Sign in is hidden there.
+  - **Policy change:** this replaces the "no accounts in v1" rule in §9.5. Identify users by the token's `sub`, as `doc/auth.md` says.
 
 ### 9.1 Stack
 
@@ -411,6 +505,17 @@ When we can't identify the model, the user picks it from a list. Those results a
 
 Privacy rules (from the README's "responsible design"): submission is opt-in per result, there are no accounts in v1, there's no raw IP storage, and we collect only the fields in the schema above. Telemetry is summarized before submission ([§10.4](#104-what-gets-recorded-and-what-leaves-the-device)). The results page shows exactly what will be sent before Submit.
 
+**Where the current upload stands against these rules:**
+
+- **Met:** upload is opt-in per run, and no IP address is stored.
+- **Changed:** accounts now exist (optional Google sign-in).
+- **Not met yet:**
+  - The page doesn't show what will be sent.
+  - The device report goes in full, not summarized: user agent, screen size, battery level, client hints, and the complete adapter limits and features. That adds up to a strong fingerprint.
+  - There is no `clientId` field.
+
+The two missing pieces should land before uploads are opened to people outside the team: the field list shown before sending, and summarized fields.
+
 ---
 
 ## 10. System telemetry beyond WebGPU
@@ -423,6 +528,16 @@ WebGPU tells us very little about the hardware, and that's deliberate: every ext
 4. **Opt-in ground truth**: the user's own sensor logs (public), or a lab setup on the team's machines.
 
 **None of this feeds the score.** It explains results ("your laptop throttled 9% during GT2"), sets warnings, and validates our methodology.
+
+**Status:** `collectDeviceReport()` in [device.ts](../src/device.ts) gathers the identification and context fields for every upload:
+
+- WebGPU adapter info, features and limits;
+- the WebGL unmasked renderer;
+- UA Client Hints (high entropy);
+- `deviceMemory`, logical cores, screen size, DPR and HDR;
+- battery state and `crossOriginIsolated`.
+
+Not built yet: Compute Pressure, the clock, bandwidth and CPU probes, repeat drift, long animation frames, wake lock, allocation accounting, the timer self-test, and lab mode.
 
 ### 10.1 Browser API inventory
 
@@ -438,7 +553,7 @@ WebGPU tells us very little about the hardware, and that's deliberate: every ext
 
 | API | What it gives | Availability | How we use it |
 | --- | --- | --- | --- |
-| `navigator.deviceMemory` | Approximate RAM in GiB, bucketed. The spec recommends clamping to 0.25–8; recent Chrome reportedly reports higher values on desktop (verify on our devices). | Chromium | Leaderboard context. Tier recommendation on unified-memory devices, where RAM is also VRAM. |
+| `navigator.deviceMemory` | Approximate RAM in GiB, bucketed. The spec recommends clamping to 0.25–8, but desktop Chrome 156/157 reported 32 and 16 on our devices (§2.1). | Chromium | Leaderboard context. Tier recommendation on unified-memory devices, where RAM is also VRAM. |
 | `performance.measureUserAgentSpecificMemory()` | The page's memory (JS, DOM, …) with a per-type breakdown. Waits for garbage collection, so a result can take seconds. | Chromium 89+, **requires cross-origin isolation** (which we get from §9.1) | Sample after load and after the last test to catch leaks between repeats, and report page memory. It doesn't cover GPU memory. |
 | `navigator.storage.estimate()` / `persist()` | Storage quota and usage | All major browsers | Before downloading assets, check there's room to cache them. Request persistence so cached assets survive. |
 | **GPU memory: our own accounting** | Exact bytes of every buffer and texture we create (format × size × mips × layers) | Ours, works everywhere | `GpuContext` wraps `createBuffer` / `createTexture` and tracks the peak per test. This sets honest "requires ~X GB GPU memory" text per tier. It doesn't include driver overhead. |
@@ -550,6 +665,11 @@ Privacy follows the README's "minimal device metadata" rule:
 
 ## 11. Testing and QA
 
+**Status:** there is no CI test job, no unit tests, and no workload-hash check yet.
+
+- **Browser tests:** [tests/frontend.spec.ts](../tests/frontend.spec.ts) has 11 Playwright checks covering both scenes end to end. Upload is mocked, and sign-in uses a fake Google script ([tests/fake-google.ts](../tests/fake-google.ts)).
+- **Device coverage:** uploads so far span Windows/NVIDIA, macOS on Apple M1 and M5 Max, and iOS, all on Chrome (§2.1). Safari, Firefox, Android, and AMD or Intel GPUs are untested.
+
 - **CI** (GitHub Actions): `tsc --noEmit`, unit tests, build, and the workload-hash check (fail if shaders or presets changed without a version bump after the freeze).
 - **Unit tests (Vitest):** stats (median, percentiles, CV), score formula, camera-path interpolation, PRNG stability, schema round-trip, GPU-string normalization.
 - **Browser smoke test (Playwright):** headless Chromium with WebGPU (SwiftShader) runs Light tier with a shortened timeline end to end, checks that a valid `RunResult` comes out, and compares probe hashes against the SwiftShader reference. This catches "the shader silently broke" regressions.
@@ -570,6 +690,24 @@ Owners follow the README's division of work. Integration, reviews, and device te
 | API, storage, leaderboard | **Michael** | §9: schema, backend, hosting and headers, IndexedDB storage layer, validation, moderation, CI. §10: telemetry summarization, crash-report endpoint |
 | Scenes, effects, user research | **Stan** | §7, camera paths and recorder, GT2 content (VAT crowd, SSAO, bloom with Yiding), user interviews and usability test |
 | WebGPU renderer and GPU algorithms | **Yiding** | §6: context refactor, offscreen and present, PBR, G-buffer, clustering rewrite, shadows, GT2 GPU-driven pipeline, timestamps. §10: allocation accounting, OOM handling, clock and bandwidth probe kernels |
+
+### Status at 2026-11-12 (week 3, alpha due Fri Nov 13)
+
+| Alpha exit criterion | State |
+| --- | --- |
+| GT1 at three tiers runs end to end in Ranked and Custom | **Not met.** There's no GT1 and there are no tiers. The Orrery runs end to end at three resolutions, with no Ranked/Custom split. |
+| FPS exceeds the refresh rate on a fast dGPU | **Met** for the Orrery: 177.8 FPS on an RTX 5080 with a 120 Hz display. |
+| Results save to history and submit to the dev backend | **Half met.** Submit works through the interim VPS store; there is no history. |
+| Demo on two devices | **Met.** Runs were uploaded from four devices (§2.1). |
+
+Merged so far:
+
+- Renderer work §6 items 1–6 (Yiding).
+- The scene library frontend (PR #1, Eric).
+- The Orrery, its throughput benchmark and score, the three-screen UI, graphs and upload (PR #2, Yiding).
+- Google sign-in (PR #3, Charles).
+
+The biggest open measurement gaps are the §3.4 protocol work (repeats, CV, flags) and moving Sponza onto the throughput loop.
 
 ### Weekly plan
 
@@ -663,13 +801,15 @@ The measurement core (§3), results and history, and submission are **not** on t
 
 Decide these in week 1. The recommendation is listed first.
 
-1. **Timeline model.** Fixed-duration, 3DMark style (recommended, §3.3), vs. fixed frame count (identical frames, but slow devices take minutes).
-2. **Backend and hosting.** Cloudflare Pages + Workers + D1 (recommended) vs. Supabase + a header-capable static host.
-3. **UI framework.** React (recommended) vs. Svelte or Preact. Eric's call.
+1. **Timeline model.** Fixed-duration, 3DMark style (recommended, §3.3), vs. fixed frame count (identical frames, but slow devices take minutes). *Settled in practice: the Orrery uses a fixed 40-second timeline paced in real time.*
+2. **Backend and hosting.** Cloudflare Pages + Workers + D1 (recommended) vs. Supabase + a header-capable static host. *Still open. Interim: JSON files on the VPS through the dev server (§9). Whatever is chosen must verify Google ID tokens server-side.*
+3. **UI framework.** React (recommended) vs. Svelte or Preact. Eric's call. *Settled: plain TypeScript, no framework.*
 4. **Reference device** for `C_tier` calibration, and its target score.
 5. **Crowd asset source** and license.
 6. **Fullscreen** required for ranked runs (recommended: required on desktop, best-effort on mobile).
-7. **Production domain.** Point `renderrank.tonyxtian.com` at the production host and stop exposing the Vite dev server.
+7. **Production domain.** Point `renderrank.tonyxtian.com` at the production host and stop exposing the Vite dev server. *Still open. The dev server now also hosts the upload endpoint, so moving off it needs a replacement for `results-api.ts`.*
 8. **Microbenchmark numbers in submissions.** Submit rounded bandwidth and minimum clock-probe speed (recommended: they help identify GPUs) vs. local-only.
 9. **Crash reports.** Enable the `Reporting-Endpoints` crash receiver (recommended, aggregate-only) vs. skip it.
 10. **Native sensor helper.** Defer and revisit after log import ships (recommended) vs. build in spring.
+11. **Suite v1 contents** (new). *Orrery + GT1* (recommended, §4) vs. the original GT1 + GT2 in Sponza. The Orrery already runs on phones and needs no assets. GT2 is the largest unbuilt item.
+12. **Accounts on uploads** (new). Attach the Google `sub` to uploads once an API verifies tokens (recommended) vs. keep uploads anonymous.

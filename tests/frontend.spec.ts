@@ -14,6 +14,8 @@ test('root opens the library without fetching or starting a scene', async ({ pag
     await expect(page.getByRole('heading', { name: 'Simulations', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
     await expect(page.locator('.scene-card')).toHaveCount(2);
+    // The Orrery is listed first
+    await expect(page.locator('.scene-card').first()).toHaveAttribute('data-scene', 'orrery');
     await expect(sceneNav(page, 'Sponza')).toBeVisible();
     await expect(sceneNav(page, 'Results')).toBeHidden();
     await expect(page.locator('#view-scene')).toBeHidden();
@@ -81,6 +83,8 @@ test('preview renders with a live graph, closes, and reopens at a different reso
     await expect(page.locator('#loading')).toBeHidden({ timeout: 30_000 });
     await expect(page.locator('#live-metrics')).toContainText('FPS');
     await expect(page.locator('#live-graph')).toBeVisible();
+    // Reference lines are labeled with their frame times, not frame rates
+    await expect(page.locator('#live-graph-axis span').first()).toHaveText(/^\d+\.\d ms$/);
     await page.screenshot({ path: testInfo.outputPath('preview.png') });
     await page.getByRole('button', { name: 'Back', exact: true }).click();
     await expect(page.locator('#viewer')).toBeHidden();
@@ -108,8 +112,8 @@ test('Sponza benchmark can be cancelled and restarted, then shows results and ex
     await expect(page.locator('#score')).toBeHidden();
     await expect(page.locator('#frame-chart svg')).toBeVisible();
     const download = page.waitForEvent('download');
-    await page.getByRole('button', { name: 'Export CSV' }).click();
-    expect((await download).suggestedFilename()).toMatch(/^renderrank-sponza-1080p-.*\.csv$/);
+    await page.getByRole('button', { name: 'Export JSON' }).click();
+    expect((await download).suggestedFilename()).toMatch(/^renderrank-sponza-1080p-.*\.json$/);
 });
 
 test('Orrery renders its camera path without loading scene assets, then switches back to Sponza', async ({ page }, testInfo) => {
@@ -138,7 +142,7 @@ test('Orrery renders its camera path without loading scene assets, then switches
     expect(errors).toEqual([]);
 });
 
-test('Orrery benchmark shows a score and graph, exports, and uploads to the server', async ({ page }) => {
+test('Orrery benchmark shows a score and graph, exports, uploads, and reopens from the saved file', async ({ page }) => {
     // The real endpoint writes a file on the server; the test only checks what the page sends
     let uploaded: any;
     await page.route('**/api/results', async route => {
@@ -156,13 +160,25 @@ test('Orrery benchmark shows a score and graph, exports, and uploads to the serv
     // A software adapter may be too slow to finish a frame in every shot, which shows a dash instead of a number
     await expect(page.locator('#score-value')).toHaveText(/^[\d,]+$|^—$/);
 
+    // The results screen shows the whole report; Export JSON saves exactly what it prints
+    await expect(page.locator('#report .report-card')).toHaveCount(9);
+    const printed = await page.locator('#report-json').textContent() ?? '';
+    const shown = JSON.parse(printed);
     const download = page.waitForEvent('download');
-    await page.getByRole('button', { name: 'Export CSV' }).click();
-    expect((await download).suggestedFilename()).toMatch(/^renderrank-orrery-1080p-.*\.csv$/);
+    await page.getByRole('button', { name: 'Export JSON' }).click();
+    const saved = await download;
+    expect(saved.suggestedFilename()).toMatch(/^renderrank-orrery-1080p-.*\.json$/);
+    const savedText = (await import('node:fs')).readFileSync(await saved.path(), 'utf8');
+    expect(savedText).toBe(printed);
+    // What the run looked like, to compare with the reopened file
+    const screen = async () => page.locator('#view-results').evaluate(view => ['#results-heading', '#result-settings', '#score', '#frame-chart', '#result-rows', '#result-note', '#report']
+        .map(selector => view.querySelector(selector)!.innerHTML));
+    const original = await screen();
 
     await page.getByRole('button', { name: 'Upload score' }).click();
     await expect(page.locator('#upload-status')).toContainText('test-result');
     await expect(page.getByRole('button', { name: 'Uploaded' })).toBeDisabled();
+    expect(uploaded).toEqual(shown);
     expect(uploaded.scene.id).toBe('orrery');
     expect(uploaded.rows).toHaveLength(4);
     expect(uploaded.device.userAgent).toContain('Chrome');
@@ -170,6 +186,27 @@ test('Orrery benchmark shows a score and graph, exports, and uploads to the serv
 
     await page.getByRole('link', { name: 'Back to scene' }).click();
     await expect(page.locator('#last-result')).toBeVisible();
+
+    // Opening the saved file from the library shows the same results screen
+    await page.goto('/#/');
+    await page.locator('#report-file').setInputFiles({ name: 'run.json', mimeType: 'application/json', buffer: Buffer.from(savedText) });
+    await expect(page).toHaveURL(/#\/results$/);
+    await expect(page.locator('#upload-status')).toHaveText('Opened from run.json');
+    await expect(page.locator('#upload')).toBeHidden();
+    expect(await screen()).toEqual(original);
+
+    // Files the server saved wrap the report with their upload ID
+    await page.goto('/#/');
+    const fromServer = JSON.stringify({ id: 'server-copy', receivedAt: new Date().toISOString(), result: shown });
+    await page.locator('#report-file').setInputFiles({ name: 'server.json', mimeType: 'application/json', buffer: Buffer.from(fromServer) });
+    await expect(page.locator('#upload-status')).toHaveText('Opened from server.json · Saved on the server as server-copy');
+    expect(await screen()).toEqual(original);
+
+    // Anything else is refused with a reason, and the library stays put
+    await page.goto('/#/');
+    await page.locator('#report-file').setInputFiles({ name: 'notes.json', mimeType: 'application/json', buffer: Buffer.from('{"hello": 1}') });
+    await expect(page.locator('#open-report-status')).toContainText('Couldn’t open notes.json');
+    await expect(page.locator('#view-library')).toBeVisible();
 });
 
 test('Sign in with Google shows the account, survives a reload, and signs out', async ({ page }, testInfo) => {

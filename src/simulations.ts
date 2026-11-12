@@ -15,7 +15,7 @@ interface SimulationBase {
     runNote: string;
     previewHelp: string;
     benchmarkHelp: string;
-    resultLabel: string; // first column of the results table and CSV
+    resultLabel: string; // first column of the results table
     resultNote: string;  // how to read the numbers
 }
 
@@ -33,7 +33,24 @@ export interface ProceduralSimulation extends SimulationBase {
 
 export type Simulation = GltfSimulation | ProceduralSimulation;
 
+// Display order: library cards, the sidebar, and the default selection all follow this array
 export const simulations: Simulation[] = [{
+    id: 'orrery',
+    name: 'Orrery',
+    category: 'Procedural scene',
+    summary: 'A ray-marched rotunda with no meshes or textures.',
+    description: 'Every surface in the Orrery is a signed distance function evaluated per pixel: a domed hall, sixteen columns, and a brass mechanism of nested rings turning around a glowing core. Soft shadows from two lights, ambient occlusion, mirror reflections, and a shadowed shaft of sunlight are all traced in one fragment shader, so the load scales directly with resolution. The camera follows a fixed 40-second path through four shots.',
+    preview: orreryPreview,
+    previewAlt: 'Brass rings around a glowing core under a dome, lit by a shaft of sunlight',
+    renderer: 'Ray-marched SDF',
+    materials: 'Procedural',
+    runNote: 'Benchmark plays the 40-second camera path once, uncapped, and gives a score. Preview loops it at the display rate.',
+    previewHelp: 'Fixed camera path · Loops every 40 seconds',
+    benchmarkHelp: 'Playing 4 shots · Keep this tab visible · Back to stop',
+    resultLabel: 'Shot',
+    resultNote: 'Frame times are from uncapped offscreen rendering; Min. and Max. are the best and worst quarter-second averages. GPU pass times, where shown, come from browser timestamp queries, which the browser rounds. Scores are not yet ranked against other devices.',
+    kind: 'procedural',
+}, {
     id: 'sponza',
     name: 'Sponza',
     category: 'Architectural scene',
@@ -51,22 +68,6 @@ export const simulations: Simulation[] = [{
     kind: 'gltf',
     source: `${import.meta.env.BASE_URL}scenes/sponza/Sponza.gltf`,
     camera: { position: [-7, 2, 0], yaw: 0, pitch: 0 },
-}, {
-    id: 'orrery',
-    name: 'Orrery',
-    category: 'Procedural scene',
-    summary: 'A ray-marched rotunda with no meshes or textures.',
-    description: 'Every surface in the Orrery is a signed distance function evaluated per pixel: a domed hall, sixteen columns, and a brass mechanism of nested rings turning around a glowing core. Soft shadows from two lights, ambient occlusion, mirror reflections, and a shadowed shaft of sunlight are all traced in one fragment shader, so the load scales directly with resolution. The camera follows a fixed 40-second path through four shots.',
-    preview: orreryPreview,
-    previewAlt: 'Brass rings around a glowing core under a dome, lit by a shaft of sunlight',
-    renderer: 'Ray-marched SDF',
-    materials: 'Procedural',
-    runNote: 'Benchmark plays the 40-second camera path once, uncapped, and gives a score. Preview loops it at the display rate.',
-    previewHelp: 'Fixed camera path · Loops every 40 seconds',
-    benchmarkHelp: 'Playing 4 shots · Keep this tab visible · Back to stop',
-    resultLabel: 'Shot',
-    resultNote: 'Frame times are from uncapped offscreen rendering; Min. and Max. are the best and worst quarter-second averages. GPU pass times, where shown, come from browser timestamp queries, which the browser rounds. Scores are not yet ranked against other devices.',
-    kind: 'procedural',
 }];
 
 export const renderResolutions: Record<string, Resolution> = {

@@ -18,8 +18,8 @@ export default defineConfig({
             '127.0.0.1'
         ],
         fs: {
-            // Vite's defaults plus .claude/, since this dev server is reachable from the internet
-            deny: ['.env', '.env.*', '*.{crt,pem}', '**/.git/**', '**/.claude/**']
+            // Vite's defaults plus .claude/ and uploaded results, since this dev server is reachable from the internet
+            deny: ['.env', '.env.*', '*.{crt,pem}', '**/.git/**', '**/.claude/**', '**/results/**']
         }
     }
 })
